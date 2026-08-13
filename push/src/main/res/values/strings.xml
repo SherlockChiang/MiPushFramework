@@ -51,6 +51,7 @@
 
 
     <string name="settings_options">Config</string>
+    <string name="settings_experimental">Experimental</string>
 
 
     <string name="pref_title_access_mode">Foreground app detection mode</string>

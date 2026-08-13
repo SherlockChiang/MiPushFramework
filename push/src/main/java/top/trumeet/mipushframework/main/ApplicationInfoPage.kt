@@ -22,14 +22,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBarDefaults
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,7 +49,14 @@ import top.trumeet.mipush.provider.db.RegisteredApplicationDb
 import top.trumeet.mipush.provider.entities.RegisteredApplication
 import top.trumeet.mipush.provider.entities.RegisteredApplication.RegisteredType
 import top.trumeet.mipushframework.component.MarkdownView
+import top.trumeet.mipushframework.component.MiuixActionButton
+import top.trumeet.mipushframework.component.MiuixActionIconButton
+import top.trumeet.mipushframework.component.MiuixPageScaffold
 import top.trumeet.ui.theme.Theme
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Surface
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 class ApplicationInfoPage : ComponentActivity() {
     companion object {
@@ -77,11 +76,9 @@ class ApplicationInfoPage : ComponentActivity() {
         init(getRegisteredApplication()!!)
         setContent {
             Theme {
-                window.navigationBarColor = MaterialTheme.colorScheme.surfaceColorAtElevation(
-                    NavigationBarDefaults.Elevation
-                ).toArgb()
+                window.navigationBarColor = MiuixTheme.colorScheme.surfaceContainer.toArgb()
+                SettingsApp()
             }
-            SettingsApp()
         }
     }
 
@@ -113,12 +110,13 @@ class ApplicationInfoPage : ComponentActivity() {
                 )
         }
 
-        Theme {
+        MiuixPageScaffold(modifier = Modifier.fillMaxSize()) { paddingValues ->
             Surface(
                 modifier = Modifier
                     .fillMaxSize()
+                    .padding(paddingValues)
                     .verticalScroll(rememberScrollState()),
-                color = MaterialTheme.colorScheme.background
+                color = MiuixTheme.colorScheme.background
             ) {
                 SettingsScreen()
             }
@@ -147,7 +145,7 @@ class ApplicationInfoPage : ComponentActivity() {
             modifier = Modifier.padding(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton({
+            MiuixActionIconButton(onClick = {
                 RegistrationHelper(
                     context,
                     applicationInfo.packageName
@@ -158,14 +156,14 @@ class ApplicationInfoPage : ComponentActivity() {
             Column(Modifier.weight(1f)) {
                 Text(
                     applicationInfo.appName,
-                    style = MaterialTheme.typography.bodyMedium
+                    style = MiuixTheme.textStyles.body2
                 )
                 Text(
                     applicationInfo.packageName,
-                    style = MaterialTheme.typography.bodySmall
+                    style = MiuixTheme.textStyles.footnote1
                 )
             }
-            IconButton({
+            MiuixActionIconButton(onClick = {
                 val uri = Uri.fromParts("package", applicationInfo.packageName, null)
                 context.startActivity(
                     Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
@@ -303,11 +301,11 @@ fun Tips(title: String, description: String) {
         )
         Spacer(Modifier.width(10.dp))
         Column {
-            Text(title, style = MaterialTheme.typography.bodyMedium)
+            Text(title, style = MiuixTheme.textStyles.body2)
 
             MarkdownView(
                 description,
-                textSize = MaterialTheme.typography.bodySmall.fontSize.value,
+                textSize = MiuixTheme.textStyles.footnote1.fontSize.value,
             )
         }
     }
@@ -318,17 +316,17 @@ private fun NotificationChannel(
     channel: NotificationChannel, appConfigurationUtils: AppConfigurationUtils
 ) {
     Row {
-        TextButton({
+        MiuixActionButton(onClick = {
             appConfigurationUtils.deleteNotificationChannel(channel)
         }) {
             Text(stringResource(R.string.notification_channels_delete))
         }
-        TextButton({
+        MiuixActionButton(onClick = {
             appConfigurationUtils.copyToClipboard(channel)
         }) {
             Text(stringResource(R.string.notification_channels_copy_id))
         }
-        TextButton({
+        MiuixActionButton(onClick = {
             appConfigurationUtils.gotoNotificationChannelSettingPage(
                 channel,
                 appConfigurationUtils.configApp

@@ -11,9 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -43,6 +40,9 @@ import top.trumeet.mipushframework.component.RefreshableLazyColumn
 import top.trumeet.mipushframework.component.iconCache
 import top.trumeet.mipushframework.main.RegistrationStateStyle
 import top.trumeet.mipushframework.utils.ParseUtils
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 data class AppInfoForDisplay(
     val registrationState: Pair<String, Color>,
@@ -173,7 +173,7 @@ private fun LastReceive(item: RegisteredApplication) {
     val info = g_itemsInfo[item.packageName]!!
     Text(
         info.lastReceiveTime,
-        style = MaterialTheme.typography.bodyLarge,
+        style = MiuixTheme.textStyles.body1,
     )
 }
 
@@ -183,12 +183,12 @@ private fun AppInfo(item: RegisteredApplication) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(
             item.appName,
-            style = MaterialTheme.typography.bodyLarge,
+            style = MiuixTheme.textStyles.body1,
             color = info.registrationState.second
         )
         Text(
             info.registrationState.first,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MiuixTheme.textStyles.body2,
             color = info.registrationState.second
         )
     }

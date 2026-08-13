@@ -10,12 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextField
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,21 +28,24 @@ import top.trumeet.common.utils.Utils
 import top.trumeet.mipushframework.MainPageOperation
 import top.trumeet.mipushframework.component.SettingsGroup
 import top.trumeet.mipushframework.component.SettingsItem
+import top.trumeet.mipushframework.component.MiuixActionButton
+import top.trumeet.mipushframework.component.MiuixInput
 import top.trumeet.mipushframework.main.AdvancedSettingsPage
 import top.trumeet.mipushframework.main.HelpPage
 import top.trumeet.ui.theme.Theme
+import top.yukonga.miuix.kmp.basic.Surface
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 fun Settings() {
-    Theme {
-        Surface(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState()),
-            color = MaterialTheme.colorScheme.background
-        ) {
-            SettingsScreen()
-        }
+    Surface(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        color = MiuixTheme.colorScheme.background
+    ) {
+        SettingsScreen()
     }
 }
 
@@ -79,22 +77,20 @@ private fun ServiceConfigurationBlock() {
 }
 
 @Composable
-@OptIn(ExperimentalMaterial3Api::class)
 private fun SetXMPPServer(context: Context) {
     var currentXMPPServer by remember { mutableStateOf("") }
-    object : InternalMessenger(context) {
-        init {
-            register(IntentFilter(XMPushServiceMessenger.IntentSetConnectionStatus))
-            addListener { intent: Intent ->
-                val host = intent.getStringExtra("host")
-                if (host.isNullOrEmpty()) {
-                    return@addListener
+    DisposableEffect(context) {
+        val messenger = object : InternalMessenger(context) {
+            init {
+                register(IntentFilter(XMPushServiceMessenger.IntentSetConnectionStatus))
+                addListener { intent: Intent ->
+                    val host = intent.getStringExtra("host")
+                    if (!host.isNullOrEmpty()) currentXMPPServer = host
                 }
-                currentXMPPServer = host
+                send(Intent(XMPushServiceMessenger.IntentGetConnectionStatus))
             }
-
-            send(Intent(XMPushServiceMessenger.IntentGetConnectionStatus))
         }
+        onDispose { messenger.close() }
     }
     var text by remember { mutableStateOf(SettingUtils.getXMPPServer(context) ?: "") }
     SettingsItem(title = stringResource(R.string.settings_XMPP_server),
@@ -102,7 +98,7 @@ private fun SetXMPPServer(context: Context) {
                 "\nSet: [${SettingUtils.getXMPPServer(context) ?: ""}]" +
                 "\nCurrent: [$currentXMPPServer]",
         confirmButton = { dismiss: () -> Unit ->
-            TextButton(onClick = {
+            MiuixActionButton(onClick = {
                 SettingUtils.setXMPPServer(context, text)
                 SettingUtils.sendXMPPReconnectRequest(context)
                 currentXMPPServer = text
@@ -115,10 +111,10 @@ private fun SetXMPPServer(context: Context) {
             text = ""
         },
         content = {
-            TextField(
+            MiuixInput(
                 value = text,
                 onValueChange = { text = it },
-                placeholder = { Text(SettingUtils.getXMPPServerHint()) },
+                label = SettingUtils.getXMPPServerHint(),
                 singleLine = true
             )
         })

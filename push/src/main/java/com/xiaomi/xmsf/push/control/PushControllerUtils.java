@@ -33,7 +33,9 @@ import com.xiaomi.xmsf.RetryRegister;
 import com.xiaomi.xmsf.push.service.receivers.BootReceiver;
 import com.xiaomi.xmsf.push.service.receivers.KeepAliveReceiver;
 
+import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import top.trumeet.common.Constants;
 
@@ -47,17 +49,86 @@ import top.trumeet.common.Constants;
 public class PushControllerUtils {
     private static Logger logger = XLog.tag(PushControllerUtils.class.getSimpleName()).build();
 
-    private static BroadcastReceiver liveReceiver = new KeepAliveReceiver();
+    private static final Object LIVE_RECEIVER_LOCK = new Object();
+    private static BroadcastReceiver liveReceiver;
+    private static Context liveReceiverContext;
+    private static final AtomicBoolean PUSH_SERVICE_RUNNING = new AtomicBoolean();
+    private static final RegistrationRetryCoordinator REGISTRATION_RETRIES =
+            new RegistrationRetryCoordinator(new RegistrationRetryCoordinator.Scheduler() {
+                private Handler handler;
+
+                private synchronized Handler handler() {
+                    if (handler == null) {
+                        handler = new Handler(Looper.getMainLooper());
+                    }
+                    return handler;
+                }
+
+                @Override
+                public boolean postDelayed(Runnable task, long delayMs) {
+                    return handler().postDelayed(task, delayMs);
+                }
+
+                @Override
+                public void removeCallbacks(Runnable task) {
+                    handler().removeCallbacks(task);
+                }
+            });
 
     private static final int[] RetryInterval = {3600000, 7200000, 14400000, 28800000, 86400000};
 
     public static void registerPush(Context context, int i) {
+        scheduleRegistrationRetry(context, i, null);
+    }
+
+    public static void registerPush(Context context, int i, long generation) {
+        scheduleRegistrationRetry(context, i, generation);
+    }
+
+    private static void scheduleRegistrationRetry(Context context, int i,
+                                                  Long expectedGeneration) {
         Objects.requireNonNull(context);
         int[] retryInterval = RetryInterval;
         int length = retryInterval.length;
-        long intervalMs = i < length ? retryInterval[i] : retryInterval[length - 1];
-        MyLog.i("for make sure xmsf register push succ, schedule register after " + intervalMs / 1000 + " sec");
-        new Handler(Looper.getMainLooper()).postDelayed(new RetryRegister(context, i), intervalMs);
+        int retryIndex = Math.max(0, i);
+        long intervalMs = retryIndex < length
+                ? retryInterval[retryIndex] : retryInterval[length - 1];
+        Context applicationContext = context.getApplicationContext();
+        if (applicationContext == null) {
+            applicationContext = context;
+        }
+        Context retryContext = applicationContext;
+        boolean scheduled = expectedGeneration == null
+                ? REGISTRATION_RETRIES.schedule(intervalMs,
+                    generation -> new RetryRegister(retryContext, retryIndex, generation))
+                : REGISTRATION_RETRIES.schedule(intervalMs, expectedGeneration,
+                    generation -> new RetryRegister(retryContext, retryIndex, generation));
+        if (scheduled) {
+            MyLog.i("for make sure xmsf register push succ, schedule register after "
+                    + intervalMs / 1000 + " sec");
+        } else {
+            MyLog.i("registration retry already pending or disabled, skip duplicate schedule");
+        }
+    }
+
+    public static boolean beginRegistrationRetry(RetryRegister retry, long generation) {
+        return REGISTRATION_RETRIES.begin(retry, generation);
+    }
+
+    public static boolean runRegistrationRetryIfActive(long generation, Runnable action) {
+        return REGISTRATION_RETRIES.runIfActive(generation, action);
+    }
+
+    public static boolean runInitialRegistrationIfEnabled(Runnable action) {
+        return REGISTRATION_RETRIES.runIfEnabled(action);
+    }
+
+    public static void cancelRegistrationRetry() {
+        REGISTRATION_RETRIES.cancelPending();
+    }
+
+    public static boolean isRegistrationRetryEnabled() {
+        return REGISTRATION_RETRIES.isEnabled();
     }
 
     public static boolean pushRegistered(final Context context) {
@@ -65,7 +136,9 @@ public class PushControllerUtils {
     }
 
     private static SharedPreferences getPrefs(Context context) {
-        return PreferenceManager.getDefaultSharedPreferences(context.getApplicationContext());
+        Context applicationContext = context.getApplicationContext();
+        return PreferenceManager.getDefaultSharedPreferences(
+                applicationContext == null ? context : applicationContext);
     }
 
     /**
@@ -101,12 +174,28 @@ public class PushControllerUtils {
      * @return is in main processMIPushMessage
      */
     public static boolean isAppMainProc(Context context) {
-        for (ActivityManager.RunningAppProcessInfo runningAppProcessInfo : ((ActivityManager)
-                context.getSystemService(Context.ACTIVITY_SERVICE))
-                .getRunningAppProcesses()) {
-            if (runningAppProcessInfo.pid == Process.myPid() && runningAppProcessInfo.processName.equals(context.getPackageName())) {
-                return true;
+        try {
+            ActivityManager activityManager = (ActivityManager)
+                    context.getSystemService(Context.ACTIVITY_SERVICE);
+            if (activityManager == null) {
+                return false;
             }
+            List<ActivityManager.RunningAppProcessInfo> processes =
+                    activityManager.getRunningAppProcesses();
+            if (processes == null) {
+                return false;
+            }
+            for (ActivityManager.RunningAppProcessInfo runningAppProcessInfo
+                    : processes) {
+                if (runningAppProcessInfo != null
+                        && runningAppProcessInfo.pid == Process.myPid()
+                        && TextUtils.equals(runningAppProcessInfo.processName,
+                        context.getPackageName())) {
+                    return true;
+                }
+            }
+        } catch (RuntimeException e) {
+            logger.w("Unable to inspect application process", e);
         }
         return false;
     }
@@ -118,7 +207,13 @@ public class PushControllerUtils {
      * @param context context param
      */
     public static void setServiceEnable(boolean enable, Context context) {
+        Context applicationContext = context.getApplicationContext();
+        if (applicationContext == null) {
+            applicationContext = context;
+        }
+        context = applicationContext;
         if (enable) {
+            REGISTRATION_RETRIES.enable();
             logger.d("Starting...");
 
 
@@ -128,30 +223,26 @@ public class PushControllerUtils {
             }
 
             try {
-                Intent serviceIntent = new Intent(context, com.xiaomi.push.service.XMPushService.class);
-                serviceIntent.putExtra(PushServiceConstants.EXTRA_TIME_STAMP, System.currentTimeMillis());
+                Intent serviceIntent = new Intent(context,
+                        com.xiaomi.push.service.XMPushService.class);
+                serviceIntent.putExtra(PushServiceConstants.EXTRA_TIME_STAMP,
+                        System.currentTimeMillis());
                 serviceIntent.setAction(PushServiceConstants.ACTION_TIMER);
                 ContextCompat.startForegroundService(context, serviceIntent);
             } catch (Throwable e) {
                 logger.e(e);
             }
 
-            try {
-                IntentFilter filter = new IntentFilter();
-                filter.addAction(Intent.ACTION_SCREEN_ON);
-                context.registerReceiver(liveReceiver, filter);
-            } catch (Throwable e) {
-                logger.e(e);
-            }
+            registerLiveReceiver(context);
 
         } else {
+            REGISTRATION_RETRIES.disable();
             logger.d("Stopping...");
 
-            try {
-                context.unregisterReceiver(liveReceiver);
-            } catch (Throwable e) {
-                logger.e(e);
-            }
+            ScheduledJobManager.getInstance(wrapContext(context))
+                    .cancelJob(FirstRegister.JOB_ID);
+
+            unregisterLiveReceiver();
 
             MiPushClient.unregisterPush(wrapContext(context));
             // Force stop and disable services.
@@ -189,5 +280,55 @@ public class PushControllerUtils {
     public static Context wrapContext(final Context context) {
         return CondomContext.wrap(context, TAG_CONDOM, XMOutbound.create(context,
                 TAG_CONDOM));
+    }
+
+    /** Returns lifecycle state reported by the in-process push service hook. */
+    public static boolean isPushServiceRunning() {
+        return PUSH_SERVICE_RUNNING.get();
+    }
+
+    public static void onPushServiceCreated() {
+        PUSH_SERVICE_RUNNING.set(true);
+    }
+
+    public static void onPushServiceDestroyed() {
+        PUSH_SERVICE_RUNNING.set(false);
+    }
+
+    static void registerLiveReceiver(Context context) {
+        Context applicationContext = context.getApplicationContext();
+        if (applicationContext == null) {
+            applicationContext = context;
+        }
+        synchronized (LIVE_RECEIVER_LOCK) {
+            if (liveReceiverContext != null) {
+                return;
+            }
+            BroadcastReceiver receiver = new KeepAliveReceiver();
+            IntentFilter filter = new IntentFilter(Intent.ACTION_SCREEN_ON);
+            try {
+                applicationContext.registerReceiver(receiver, filter);
+                liveReceiver = receiver;
+                liveReceiverContext = applicationContext;
+            } catch (Throwable e) {
+                logger.e("Unable to register screen-on recovery receiver", e);
+            }
+        }
+    }
+
+    static void unregisterLiveReceiver() {
+        synchronized (LIVE_RECEIVER_LOCK) {
+            if (liveReceiverContext == null || liveReceiver == null) {
+                return;
+            }
+            try {
+                liveReceiverContext.unregisterReceiver(liveReceiver);
+            } catch (Throwable e) {
+                logger.e("Unable to unregister screen-on recovery receiver", e);
+            } finally {
+                liveReceiver = null;
+                liveReceiverContext = null;
+            }
+        }
     }
 }

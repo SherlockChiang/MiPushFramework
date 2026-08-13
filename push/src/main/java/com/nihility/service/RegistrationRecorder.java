@@ -18,7 +18,12 @@ public class RegistrationRecorder {
     Context context;
 
     public void initContext(Context context) {
-        this.context = context;
+        Context applicationContext = context == null ? null : context.getApplicationContext();
+        this.context = applicationContext == null ? context : applicationContext;
+    }
+
+    public void clearContext() {
+        context = null;
     }
 
     public void recordRegSec(XmPushActionContainer container) {

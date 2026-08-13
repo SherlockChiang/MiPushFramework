@@ -25,6 +25,9 @@ android {
             consumerProguardFiles 'proguard-rules.pro'
         }
     }
+    buildFeatures {
+        buildConfig true
+    }
     namespace 'com.oasisfeng.condom'
 }
 
@@ -48,7 +51,7 @@ android.libraryVariants.all { variant ->
 
 task sourcesJar(type: Jar) {
     from android.sourceSets.main.java.srcDirs
-    classifier = 'sources'
+    archiveClassifier = 'sources'
 }
 
 artifacts {

@@ -8,12 +8,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBarDefaults
-import androidx.compose.material3.Surface
-import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,7 +29,10 @@ import com.xiaomi.xmsf.utils.ConfigCenter
 import top.trumeet.common.utils.Utils
 import top.trumeet.mipushframework.component.SettingsGroup
 import top.trumeet.mipushframework.component.SettingsItem
+import top.trumeet.mipushframework.component.MiuixPageScaffold
 import top.trumeet.ui.theme.Theme
+import top.yukonga.miuix.kmp.basic.Surface
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 
 class AdvancedSettingsPage : ComponentActivity() {
@@ -40,23 +40,22 @@ class AdvancedSettingsPage : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             Theme {
-                window.navigationBarColor = MaterialTheme.colorScheme.surfaceColorAtElevation(
-                    NavigationBarDefaults.Elevation
-                ).toArgb()
+                window.navigationBarColor = MiuixTheme.colorScheme.surfaceContainer.toArgb()
+                SettingsApp()
             }
-            SettingsApp()
         }
     }
 }
 
 @Composable
 private fun SettingsApp() {
-    Theme {
+    MiuixPageScaffold(modifier = Modifier.fillMaxSize()) { paddingValues ->
         Surface(
             modifier = Modifier
                 .fillMaxSize()
+                .padding(paddingValues)
                 .verticalScroll(rememberScrollState()),
-            color = MaterialTheme.colorScheme.background
+            color = MiuixTheme.colorScheme.background
         ) {
             SettingsScreen()
         }

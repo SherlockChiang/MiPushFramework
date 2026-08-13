@@ -1,7 +1,7 @@
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
 
 buildscript {
-    ext.kotlin_version = '1.8.0'
+    ext.kotlin_version = '2.0.21'
 
     repositories {
         maven { url = uri("https://maven.aliyun.com/repository/central") }
@@ -15,10 +15,11 @@ buildscript {
         google()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:7.4.2'
-        classpath 'org.greenrobot:greendao-gradle-plugin:3.3.0'
+        classpath 'com.android.tools.build:gradle:8.2.2'
+        classpath 'org.greenrobot:greendao-gradle-plugin:3.3.1'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
-        classpath 'io.github.wurensen:gradle-android-plugin-aspectjx:3.3.2'
+        classpath "org.jetbrains.kotlin:compose-compiler-gradle-plugin:$kotlin_version"
+        classpath 'io.freefair.gradle:android-gradle-plugins:8.2.2'
     }
 
 }
@@ -100,8 +101,8 @@ private String getVersionNameFromGit() {
 }
 
 ext {
-    minSdkVersion = 21
-    compileSdkVersion = 33
+    minSdkVersion = 26
+    compileSdkVersion = 34
     targetSdkVersion = 30
     pushVersionCode = 7
 

@@ -1,7 +1,10 @@
 package test.com.nihility.service.service;
 
 import static com.nihility.service.XMPushServiceListener.ConnectionStatus.connecting;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 
 import android.content.Intent;
 
@@ -35,6 +38,43 @@ public class XMPushServiceListenerNotifierTest {
     public void invokeListenersForDestroy() {
         notifier.destroy();
         verify(listener).destroy();
+    }
+
+    @Test
+    public void releaseListenersAfterDestroy() {
+        notifier.destroy();
+        notifier.destroy();
+
+        verify(listener, times(1)).destroy();
+    }
+
+    @Test
+    public void listenerMayBeAddedDuringNotification() {
+        XMPushServiceListener addedListener = org.mockito.Mockito.mock(
+                XMPushServiceListener.class);
+        doAnswer(invocation -> {
+            notifier.addListener(addedListener);
+            return null;
+        }).when(listener).created();
+
+        notifier.created();
+
+        verify(listener).created();
+        verify(addedListener, times(0)).created();
+    }
+
+    @Test(expected = IllegalStateException.class)
+    public void destroyContinuesCleanupAfterListenerFailure() {
+        XMPushServiceListener secondListener = org.mockito.Mockito.mock(
+                XMPushServiceListener.class);
+        notifier.addListener(secondListener);
+        doThrow(new IllegalStateException("failure")).when(listener).destroy();
+
+        try {
+            notifier.destroy();
+        } finally {
+            verify(secondListener).destroy();
+        }
     }
 
     @Test

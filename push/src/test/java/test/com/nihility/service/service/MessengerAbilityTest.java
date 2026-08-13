@@ -26,4 +26,11 @@ public class MessengerAbilityTest {
         verify(messenger).notifyConnectionStatusChanged(ConnectionStatus.connected.ordinal());
     }
 
+    @Test
+    public void unregisterMessengerAfterServiceDestroy() {
+        listener.destroy();
+
+        verify(messenger).close();
+    }
+
 }

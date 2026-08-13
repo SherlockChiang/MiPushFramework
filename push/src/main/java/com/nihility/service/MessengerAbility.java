@@ -13,4 +13,9 @@ public class MessengerAbility implements XMPushServiceListener {
     public void connectionStatusChanged(ConnectionStatus connectionStatus) {
         messenger.notifyConnectionStatusChanged(connectionStatus.ordinal());
     }
+
+    @Override
+    public void destroy() {
+        messenger.close();
+    }
 }

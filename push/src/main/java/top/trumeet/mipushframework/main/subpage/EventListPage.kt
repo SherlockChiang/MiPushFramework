@@ -13,10 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -36,7 +32,6 @@ import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.DialogProperties
 import com.elvishew.xlog.XLog
 import com.xiaomi.xmsf.R
 import com.xiaomi.xmsf.push.utils.RegSecUtils
@@ -48,8 +43,12 @@ import top.trumeet.common.utils.Utils
 import top.trumeet.mipush.provider.entities.Event
 import top.trumeet.mipush.provider.event.type.TypeFactory
 import top.trumeet.mipushframework.component.AppIcon
+import top.trumeet.mipushframework.component.MiuixActionButton
+import top.trumeet.mipushframework.component.MiuixDialog
 import top.trumeet.mipushframework.component.RefreshableLazyColumn
 import top.trumeet.mipushframework.component.TextView
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.text.SimpleDateFormat
 import java.util.Date
 
@@ -130,14 +129,34 @@ private fun EventDetailsDialog(
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
     val targetHeight = screenHeight * 0.9f
 
-    AlertDialog(
-        onDismiss,
-        {
+    val show = remember(clickedEvent.id) { mutableStateOf(true) }
+    MiuixDialog(
+        title = "Developer Info",
+        show = show,
+        onDismiss = {
+            onDismiss()
+        },
+        modifier = Modifier.heightIn(Dp.Unspecified, targetHeight),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                MiuixActionButton(onClick = {
+                    EventListPageUtils.startManagePermissions(
+                        context,
+                        clickedEvent.packageName
+                    )
+                }) { Text(stringResource(R.string.action_app_info)) }
+            }
+            TextView(json)
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                TextButton({
+                MiuixActionButton(onClick = {
                     json =
                         EventListPageUtils.getContent(
                             clickedEvent.event,
@@ -145,11 +164,11 @@ private fun EventDetailsDialog(
                         )
                 }) { Text(stringResource(R.string.action_configurate)) }
 
-                TextButton({
+                MiuixActionButton(onClick = {
                     EventListPageUtils.copyToClipboard(context, json)
                 }) { Text(stringResource(android.R.string.copy)) }
 
-                TextButton({
+                MiuixActionButton(onClick = {
                     EventListPageUtils.mockMessage(
                         RegSecUtils.getContainerWithRegSec(
                             clickedEvent.event
@@ -157,30 +176,8 @@ private fun EventDetailsDialog(
                     )
                 }) { Text(stringResource(R.string.action_notify)) }
             }
-        },
-        title = {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .height(36.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Developer Info", style = MaterialTheme.typography.titleLarge)
-
-                TextButton({
-                    EventListPageUtils.startManagePermissions(
-                        context,
-                        clickedEvent.packageName
-                    )
-                }) { Text(stringResource(R.string.action_app_info)) }
-            }
-        },
-        text = {
-            TextView(json)
-        },
-        modifier = Modifier.heightIn(Dp.Unspecified, targetHeight)
-    )
+        }
+    }
 }
 
 private val g_items = mutableStateListOf<EventInfoForDisplay>()
@@ -257,28 +254,28 @@ private fun EventItem(item: EventInfoForDisplay, onClick: (EventInfoForDisplay) 
 @Composable
 private fun ConfigOptions(item: EventInfoForDisplay) {
     if (item.configOptions.isNotEmpty()) {
-        Text(item.configOptions.toString(), style = MaterialTheme.typography.bodySmall)
+        Text(item.configOptions.toString(), style = MiuixTheme.textStyles.footnote1)
         Spacer(Modifier.width(5.dp))
     }
 }
 
 @Composable
 private fun ChannelInfo(item: EventInfoForDisplay) {
-    Text(item.channel, style = MaterialTheme.typography.bodySmall)
+    Text(item.channel, style = MiuixTheme.textStyles.footnote1)
 }
 
 
 @Composable
 private fun EventReceiveDate(item: EventInfoForDisplay) {
     val format = receiveDateFormat
-    Text(format.format(item.receiveDate), style = MaterialTheme.typography.bodySmall)
+    Text(format.format(item.receiveDate), style = MiuixTheme.textStyles.footnote1)
 }
 
 @Composable
 private fun EventTitle(item: EventInfoForDisplay) {
     Text(
         item.title,
-        style = MaterialTheme.typography.bodyLarge,
+        style = MiuixTheme.textStyles.body1,
     )
 }
 
@@ -286,7 +283,7 @@ private fun EventTitle(item: EventInfoForDisplay) {
 private fun EventContent(item: EventInfoForDisplay) {
     Text(
         item.content,
-        style = MaterialTheme.typography.bodyMedium,
+        style = MiuixTheme.textStyles.body2,
     )
 }
 

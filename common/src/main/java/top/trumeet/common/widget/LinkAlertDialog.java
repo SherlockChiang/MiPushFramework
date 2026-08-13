@@ -2,11 +2,10 @@ package top.trumeet.common.widget;
 
 import android.content.Context;
 import android.text.method.LinkMovementMethod;
+import android.util.TypedValue;
 import android.widget.TextView;
 
 import androidx.appcompat.app.AlertDialog;
-
-import top.trumeet.common.R;
 
 /**
  * Created by Trumeet on 2017/12/30.
@@ -43,8 +42,10 @@ public class LinkAlertDialog extends AlertDialog {
         @Override
         public Builder setMessage(CharSequence message) {
             TextView textView = new TextView(getContext());
-            int padding = (int) getContext().getResources()
-                    .getDimension(R.dimen.abc_dialog_padding_material);
+            int padding = (int) TypedValue.applyDimension(
+                    TypedValue.COMPLEX_UNIT_DIP,
+                    24,
+                    getContext().getResources().getDisplayMetrics());
             textView.setPadding(padding, padding, padding, padding);
             textView.setMovementMethod(LinkMovementMethod.getInstance());
             textView.setText(message);

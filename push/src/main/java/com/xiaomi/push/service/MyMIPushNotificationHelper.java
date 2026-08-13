@@ -182,10 +182,15 @@ public class MyMIPushNotificationHelper {
 
     private static Notification findActiveNotification(String packageName, int notificationId) {
         StatusBarNotification[] notifications = getNotificationManagerEx().getActiveNotifications(packageName);
-        assert notifications != null;
+        if (notifications == null) {
+            return null;
+        }
         for (StatusBarNotification notification : notifications) {
-            if (notification.getId() == notificationId) {
-                return notification.getNotification();
+            if (notification != null && notification.getId() == notificationId) {
+                Notification activeNotification = notification.getNotification();
+                if (activeNotification != null) {
+                    return activeNotification;
+                }
             }
         }
         return null;
@@ -254,7 +259,7 @@ public class MyMIPushNotificationHelper {
         addDebugAction(context, container, decryptedContent, metaInfo, packageName, notificationBuilder);
 
         notificationBuilder.setWhen(metaInfo.getMessageTs());
-        notificationBuilder.setShowWhen(true);
+        notificationBuilder.setShowWhen(custom.notificationShowWhen(true));
 
         String group = getGroupName(context, container);
         notificationBuilder.setGroup(group);
