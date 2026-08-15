@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application>
+        <!-- Disable production automatic receivers in QA variant -->
+        <receiver
+            android:name="com.xiaomi.xmsf.push.service.receivers.BootReceiver"
+            android:enabled="false"
+            android:exported="false"
+            tools:replace="android:enabled,android:exported" />
+
+        <receiver
+            android:name="com.xiaomi.xmsf.push.service.receivers.NetworkStatusReceiver"
+            android:enabled="false"
+            android:exported="false"
+            tools:replace="android:enabled,android:exported" />
+
+        <receiver
+            android:name="com.xiaomi.xmsf.push.service.receivers.MiPushPingReceiver"
+            android:enabled="false"
+            android:exported="false"
+            tools:replace="android:enabled,android:exported" />
+
+        <receiver
+            android:name="com.xiaomi.xmsf.push.service.receivers.AccountChangedReceiver"
+            android:enabled="false"
+            android:exported="false"
+            tools:replace="android:enabled,android:exported" />
+
+        <receiver
+            android:name="com.xiaomi.xmsf.push.service.receivers.PkgUninstallReceiver"
+            android:enabled="false"
+            android:exported="false"
+            tools:replace="android:enabled,android:exported" />
+
+        <receiver
+            android:name="com.xiaomi.push.service.SelfUpdateReceiver"
+            android:enabled="false"
+            android:exported="false"
+            tools:replace="android:enabled,android:exported" />
+
+        <receiver
+            android:name="com.catchingnow.icebox.sdk_client.StateReceiver"
+            android:enabled="false"
+            android:exported="false"
+            tools:replace="android:enabled,android:exported" />
+
+        <receiver
+            android:name="com.xiaomi.xmsf.push.service.receivers.NotificationEventReceiver"
+            android:enabled="false"
+            android:exported="false"
+            tools:replace="android:enabled,android:exported" />
+
+        <receiver
+            android:name="com.xiaomi.push.revival.NotificationsRevivalForSelfUpdated"
+            android:enabled="false"
+            android:exported="false"
+            tools:replace="android:enabled,android:exported" />
+
+        <!-- These are public SDK entry points in production. They must not expose the
+             side-by-side QA package as a system push provider. -->
+        <receiver
+            android:name="com.xiaomi.xmsf.push.service.receivers.MiuiPushMessageReceiver"
+            android:enabled="false"
+            android:exported="false"
+            tools:replace="android:enabled,android:exported" />
+
+        <!-- Restrict Push services in QA variant to internal testing only -->
+        <service
+            android:name="com.xiaomi.xmsf.push.service.HttpService"
+            android:exported="false"
+            tools:replace="android:exported" />
+
+        <service
+            android:name="com.xiaomi.xmsf.push.service.MiuiPushActivateService"
+            android:exported="false"
+            tools:replace="android:exported" />
+
+        <service
+            android:name="top.trumeet.common.ita.DetectionService"
+            android:exported="false"
+            tools:replace="android:exported" />
+
+        <service
+            android:name="com.xiaomi.push.service.XMPushService"
+            android:exported="false"
+            tools:replace="android:exported" />
+
+        <service
+            android:name="com.xiaomi.xmsf.push.service.XMPushService"
+            android:exported="false"
+            tools:replace="android:exported" />
+
+        <service
+            android:name="com.xiaomi.mipush.sdk.PushMessageHandler"
+            android:enabled="false"
+            android:exported="false"
+            tools:replace="android:enabled,android:exported" />
+    </application>
+</manifest>

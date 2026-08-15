@@ -1,7 +1,12 @@
 package top.trumeet.mipushframework.main
 
+import android.app.AlarmManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -27,13 +32,12 @@ import com.xiaomi.xmsf.R
 import com.xiaomi.xmsf.SettingUtils
 import com.xiaomi.xmsf.utils.ConfigCenter
 import top.trumeet.common.utils.Utils
+import top.trumeet.mipushframework.component.MiuixPageScaffold
 import top.trumeet.mipushframework.component.SettingsGroup
 import top.trumeet.mipushframework.component.SettingsItem
-import top.trumeet.mipushframework.component.MiuixPageScaffold
 import top.trumeet.ui.theme.Theme
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-
 
 class AdvancedSettingsPage : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -61,7 +65,6 @@ private fun SettingsApp() {
         }
     }
 }
-
 
 @Composable
 private fun SettingsScreen() {
@@ -112,6 +115,32 @@ fun ConfigurationsBlock() {
             values = stringArrayResource(R.array.pref_title_access_mode_list_titles),
             defaultValue = "0"
         )
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+        val exactAllowed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            alarmManager?.canScheduleExactAlarms() == true
+        } else {
+            true
+        }
+        SettingsItem(
+            title = "Alarm schedule policy",
+            summary = if (exactAllowed) "Exact alarm allowed (EXACT)" else "Exact alarm not granted, falling back to INEXACT. Tap to open system settings."
+        ) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                try {
+                    val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                        data = Uri.parse("package:${context.packageName}")
+                    }
+                    context.startActivity(intent)
+                } catch (e: Exception) {
+                    try {
+                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.parse("package:${context.packageName}")
+                        }
+                        context.startActivity(intent)
+                    } catch (ignored: Exception) {}
+                }
+            }
+        }
     }
 }
 
@@ -137,6 +166,12 @@ private fun ExperimentalBlock() {
             summary = stringResource(R.string.settings_mock_notification_summary)
         ) {
             SettingUtils.notifyMockNotification(context)
+        }
+        SettingsItem(
+            title = stringResource(R.string.settings_mock_focus_notification),
+            summary = stringResource(R.string.settings_mock_focus_notification_summary)
+        ) {
+            SettingUtils.notifyMockFocusNotification(context)
         }
 
         SettingsItem(
@@ -185,4 +220,3 @@ private fun SettingsPreview() {
     Utils.context = LocalContext.current
     SettingsApp()
 }
-

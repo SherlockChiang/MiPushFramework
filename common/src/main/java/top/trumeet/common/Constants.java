@@ -83,19 +83,11 @@ public final class Constants {
      */
     public static final String LOG_FILE = "/file.log";
 
-    public static final String AUTHORITY_FILE_PROVIDER = "top.trumeet.mipushframework.fileprovider";
-
     public static final String SERVICE_APP_NAME = "com.xiaomi.xmsf";
 
     public static final String MANAGER_APP_NAME = "top.trumeet.mipush";
 
     public static final int PUSH_SERVICE_VERSION_CODE = Integer.parseInt(BuildConfig.PUSH_VERSION_CODE);
-
-    public static final String SHARE_LOG_COMPONENT_NAME =
-            SERVICE_APP_NAME + ".ShareLogActivity";
-
-    public static final String REMOVE_DOZE_COMPONENT_NAME =
-            SERVICE_APP_NAME + ".RemoveDozeActivity";
 
     public static final String INTENT_NOTIFICATION_ID = "mipush_notification_id";
     public static final String INTENT_NOTIFICATION_GROUP = "mipush_notification_group";

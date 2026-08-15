@@ -4,20 +4,23 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 
-import androidx.core.content.ContextCompat;
-
 import com.xiaomi.channel.commonutils.network.Network;
 import com.xiaomi.mipush.sdk.PushServiceClient;
 import com.xiaomi.smack.util.TrafficUtils;
+import com.xiaomi.xmsf.push.control.PushServiceDispatcher;
 
 public class NetworkStatusReceiver extends BroadcastReceiver {
     public void onReceive(Context context, Intent intent) {
-        Intent intent2 = new Intent(context, com.xiaomi.push.service.XMPushService.class);
-        intent2.setAction("com.xiaomi.push.network_status_changed");
-        ContextCompat.startForegroundService(context, intent2);
-        TrafficUtils.notifyNetworkChanage(context);
-        if (Network.hasNetwork(context) && PushServiceClient.getInstance(context).isProvisioned()) {
-            PushServiceClient.getInstance(context).processRegisterTask();
+        PushServiceDispatcher.dispatchStart(context, false);
+        try {
+            TrafficUtils.notifyNetworkChanage(context);
+        } catch (Throwable ignored) {
+        }
+        try {
+            if (Network.hasNetwork(context) && PushServiceClient.getInstance(context).isProvisioned()) {
+                PushServiceClient.getInstance(context).processRegisterTask();
+            }
+        } catch (Throwable ignored) {
         }
     }
 }

@@ -2,11 +2,16 @@ package top.trumeet.ui.theme
 
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme as materialDarkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.lightColorScheme as materialLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
 import top.yukonga.miuix.kmp.theme.Colors
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.darkColorScheme
@@ -24,6 +29,40 @@ private val LightColorScheme: Colors = lightColorScheme(
     onTertiaryContainer = MiuixBlueLight,
 )
 
+fun materialToMiuixColors(
+    materialColors: ColorScheme,
+    baseColors: Colors
+): Colors {
+    return baseColors.copy(
+        primary = materialColors.primary,
+        primaryVariant = materialColors.primary,
+        onPrimary = materialColors.onPrimary,
+        primaryContainer = materialColors.primaryContainer,
+        onPrimaryContainer = materialColors.onPrimaryContainer,
+        secondary = materialColors.secondary,
+        onSecondary = materialColors.onSecondary,
+        secondaryContainer = materialColors.secondaryContainer,
+        onSecondaryContainer = materialColors.onSecondaryContainer,
+        background = materialColors.background,
+        onBackground = materialColors.onBackground,
+        surface = materialColors.surfaceContainerLow,
+        onSurface = materialColors.onSurface,
+        surfaceVariant = materialColors.surfaceVariant,
+        surfaceContainer = materialColors.surfaceContainer,
+        onSurfaceContainer = materialColors.onSurface,
+        surfaceContainerHigh = materialColors.surfaceContainerHigh,
+        onSurfaceContainerHigh = materialColors.onSurface,
+        surfaceContainerHighest = materialColors.surfaceContainerHighest,
+        onSurfaceContainerHighest = materialColors.onSurface,
+        onSurfaceSecondary = materialColors.onSurfaceVariant,
+        onSurfaceVariantSummary = materialColors.onSurfaceVariant,
+        onSurfaceVariantActions = materialColors.onSurfaceVariant,
+        outline = materialColors.outline,
+        dividerLine = materialColors.outlineVariant,
+        onTertiaryContainer = materialColors.onTertiaryContainer,
+    )
+}
+
 @Composable
 fun Theme(
     darkTheme: Boolean = isSystemInDarkTheme(),
@@ -32,32 +71,26 @@ fun Theme(
     content: @Composable () -> Unit
 ) {
     val context = LocalContext.current
-    val dynamicPrimaryArgb = if (dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        Color(
-            ContextCompat.getColor(
-                context,
-                if (darkTheme) android.R.color.system_accent1_200
-                else android.R.color.system_accent1_600
-            )
-        ).value
+    val materialColors = if (dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
     } else {
-        null
+        if (darkTheme) {
+            materialDarkColorScheme(primary = MiuixBlueDark)
+        } else {
+            materialLightColorScheme(primary = MiuixBlueLight)
+        }
     }
+    val configuration = LocalConfiguration.current
     val baseColors = if (darkTheme) DarkColorScheme else LightColorScheme
-    val colors = remember(darkTheme, dynamicPrimaryArgb) {
-        dynamicPrimaryArgb?.let { argb ->
-            val primary = Color(argb)
-            baseColors.copy(
-                primary = primary,
-                primaryVariant = primary,
-                onTertiaryContainer = primary,
-            )
-        } ?: baseColors
+    val colors = remember(context, configuration, darkTheme, dynamicColor, materialColors) {
+        materialToMiuixColors(materialColors, baseColors)
     }
 
-    MiuixTheme(
-        colors = colors,
-        textStyles = AppTextStyles,
-        content = content,
-    )
+    MaterialTheme(colorScheme = materialColors) {
+        MiuixTheme(
+            colors = colors,
+            textStyles = AppTextStyles,
+            content = content,
+        )
+    }
 }

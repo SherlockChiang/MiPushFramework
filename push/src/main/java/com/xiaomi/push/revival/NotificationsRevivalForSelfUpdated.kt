@@ -9,6 +9,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.PendingIntent.FLAG_NO_CREATE
 import android.app.PendingIntent.FLAG_UPDATE_CURRENT
+import android.app.PendingIntent.FLAG_IMMUTABLE
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.ContextWrapper
@@ -85,7 +86,8 @@ private const val TIMEOUT_DEBUG = 5 * 60_000
     ) {
         payload.putExtra(null, sbn)
         val pi =
-            PendingIntent.getBroadcast(context, identity, payload, FLAG_UPDATE_CURRENT)
+            PendingIntent.getBroadcast(context, identity, payload,
+                FLAG_UPDATE_CURRENT or FLAG_IMMUTABLE)
         am.set(AlarmManager.ELAPSED_REALTIME, expireAtElapsed, pi)
     }
 
@@ -151,7 +153,8 @@ private const val TIMEOUT_DEBUG = 5 * 60_000
             context: Context?,
             identity: Int,
             retriever: Intent
-        ): PendingIntent? = PendingIntent.getBroadcast(context, identity, retriever, FLAG_NO_CREATE)
+        ): PendingIntent? = PendingIntent.getBroadcast(
+            context, identity, retriever, FLAG_NO_CREATE or FLAG_IMMUTABLE)
 
         private fun restoreNotification(context: Context, sbn: StatusBarNotification) {
             var n = sbn.notification

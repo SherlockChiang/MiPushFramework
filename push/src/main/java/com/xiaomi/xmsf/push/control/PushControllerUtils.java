@@ -19,15 +19,12 @@ import android.os.Process;
 import android.preference.PreferenceManager;
 import android.text.TextUtils;
 
-import androidx.core.content.ContextCompat;
-
 import com.elvishew.xlog.Logger;
 import com.elvishew.xlog.XLog;
 import com.oasisfeng.condom.CondomContext;
 import com.xiaomi.channel.commonutils.logger.MyLog;
 import com.xiaomi.channel.commonutils.misc.ScheduledJobManager;
 import com.xiaomi.mipush.sdk.MiPushClient;
-import com.xiaomi.push.service.PushServiceConstants;
 import com.xiaomi.xmsf.FirstRegister;
 import com.xiaomi.xmsf.RetryRegister;
 import com.xiaomi.xmsf.push.service.receivers.BootReceiver;
@@ -216,25 +213,12 @@ public class PushControllerUtils {
             REGISTRATION_RETRIES.enable();
             logger.d("Starting...");
 
-
             if (isAppMainProc(context)) {
                 ScheduledJobManager.getInstance(wrapContext(context))
                         .addOneShootJob(new FirstRegister(wrapContext(context)));
             }
 
-            try {
-                Intent serviceIntent = new Intent(context,
-                        com.xiaomi.push.service.XMPushService.class);
-                serviceIntent.putExtra(PushServiceConstants.EXTRA_TIME_STAMP,
-                        System.currentTimeMillis());
-                serviceIntent.setAction(PushServiceConstants.ACTION_TIMER);
-                ContextCompat.startForegroundService(context, serviceIntent);
-            } catch (Throwable e) {
-                logger.e(e);
-            }
-
-            registerLiveReceiver(context);
-
+            PushServiceDispatcher.dispatchStart(context, true);
         } else {
             REGISTRATION_RETRIES.disable();
             logger.d("Stopping...");
@@ -248,7 +232,9 @@ public class PushControllerUtils {
             // Force stop and disable services.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 JobScheduler scheduler = (JobScheduler) context.getSystemService(Context.JOB_SCHEDULER_SERVICE);
-                scheduler.cancelAll();
+                if (scheduler != null) {
+                    scheduler.cancelAll();
+                }
             }
             context.stopService(new Intent(context, com.xiaomi.push.service.XMPushService.class));
         }
@@ -295,7 +281,7 @@ public class PushControllerUtils {
         PUSH_SERVICE_RUNNING.set(false);
     }
 
-    static void registerLiveReceiver(Context context) {
+    public static void registerLiveReceiver(Context context) {
         Context applicationContext = context.getApplicationContext();
         if (applicationContext == null) {
             applicationContext = context;
@@ -316,7 +302,7 @@ public class PushControllerUtils {
         }
     }
 
-    static void unregisterLiveReceiver() {
+    public static void unregisterLiveReceiver() {
         synchronized (LIVE_RECEIVER_LOCK) {
             if (liveReceiverContext == null || liveReceiver == null) {
                 return;

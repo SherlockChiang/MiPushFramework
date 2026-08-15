@@ -132,12 +132,30 @@ fun MiuixBottomNavigation(
     selected: Int,
     onClick: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    floating: Boolean = true,
 ) {
-    NavigationBar(
-        modifier = modifier,
-        items = items,
-        selected = selected,
-        onClick = onClick,
-        defaultWindowInsetsPadding = true,
-    )
+    if (floating) {
+        Surface(
+            modifier = modifier,
+            shape = SmoothRoundedCornerShape(28.dp),
+            color = MiuixTheme.colorScheme.surfaceContainer,
+            shadowElevation = 12f,
+        ) {
+            NavigationBar(
+                items = items,
+                selected = selected,
+                onClick = onClick,
+                color = Color.Transparent,
+                defaultWindowInsetsPadding = false,
+            )
+        }
+    } else {
+        NavigationBar(
+            modifier = modifier,
+            items = items,
+            selected = selected,
+            onClick = onClick,
+            defaultWindowInsetsPadding = true,
+        )
+    }
 }

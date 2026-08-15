@@ -73,6 +73,7 @@ import top.trumeet.mipush.provider.entities.RegisteredApplication;
  */
 
 public class MyMIPushNotificationHelper {
+
     public static final String CLASS_NAME_PUSH_MESSAGE_HANDLER = "com.xiaomi.mipush.sdk.PushMessageHandler";
     private static Logger logger = XLog.tag("MyNotificationHelper").build();
 
@@ -106,10 +107,33 @@ public class MyMIPushNotificationHelper {
     private static final String NOTIFICATION_STYLE_BUTTON_RIGHT_WEB_URI = "notification_style_button_right_web_uri";
     private static final String NOTIFICATION_STYLE_TYPE = "notification_style_type";
 
-
     private static boolean tryLoadConfigurations = false;
 
-    private static ExecutorService executorService = Executors.newFixedThreadPool(3);
+    private static final java.util.concurrent.atomic.AtomicInteger NOTIFICATION_THREAD_COUNT =
+            new java.util.concurrent.atomic.AtomicInteger(1);
+    private static final java.util.concurrent.ThreadPoolExecutor executorService = createNotificationExecutor();
+
+    public static java.util.concurrent.ThreadPoolExecutor getNotificationExecutor() {
+        return executorService;
+    }
+
+    private static java.util.concurrent.ThreadPoolExecutor createNotificationExecutor() {
+        java.util.concurrent.ThreadPoolExecutor executor = new java.util.concurrent.ThreadPoolExecutor(
+                3,
+                3,
+                30L,
+                java.util.concurrent.TimeUnit.SECONDS,
+                new java.util.concurrent.ArrayBlockingQueue<>(32),
+                r -> {
+                    Thread t = new Thread(r, "mipush-notification-" + NOTIFICATION_THREAD_COUNT.getAndIncrement());
+                    t.setDaemon(false);
+                    return t;
+                },
+                new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy()
+        );
+        executor.allowCoreThreadTimeOut(true);
+        return executor;
+    }
 
     /**
      * @see `MIPushNotificationHelper`#notifyPushMessage
@@ -126,23 +150,24 @@ public class MyMIPushNotificationHelper {
     }
 
     private static void handleNotificationByConfigurations(Context context, byte[] decryptedContent, String packageName, XmPushActionContainer container) {
+        Context appContext = context.getApplicationContext() != null ? context.getApplicationContext() : context;
         try {
             Set<String> operations = Configurations.getInstance().handle(packageName, container);
 
             if (operations.contains(PackageConfig.OPERATION_WAKE)) {
-                wakeScreen(context, packageName);
+                wakeScreen(appContext, packageName);
             }
             if (!operations.contains(PackageConfig.OPERATION_IGNORE)) {
                 executorService.execute(() -> {
                     try {
-                        doNotifyPushMessage(context, container, decryptedContent);
+                        doNotifyPushMessage(appContext, container, decryptedContent);
                     } catch (Exception e) {
                         logger.e(e.getLocalizedMessage(), e);
                     }
                 });
             }
             if (operations.contains(PackageConfig.OPERATION_OPEN)) {
-                MyPushMessageHandler.startService(context, container, decryptedContent);
+                MyPushMessageHandler.startService(appContext, container, decryptedContent);
             }
         } catch (Exception e) {
             logger.e(e.getLocalizedMessage(), e);
@@ -172,6 +197,9 @@ public class MyMIPushNotificationHelper {
 
     private static void wakeScreen(Context context, String sourcePackage) {
         PowerManager powerManager = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+        if (powerManager == null) {
+            return;
+        }
         PowerManager.WakeLock fullWakeLock = powerManager.newWakeLock((
                 PowerManager.SCREEN_BRIGHT_WAKE_LOCK |
                         PowerManager.FULL_WAKE_LOCK |
@@ -290,12 +318,11 @@ public class MyMIPushNotificationHelper {
 
     private static Context getPackageContext(Context context, String packageName) {
         Context pkgCtx = context;
-        if (NotificationManagerEx.isHooked) {
-            try {
-                pkgCtx = context.createPackageContext(packageName, 0);
-            } catch (PackageManager.NameNotFoundException e) {
-                e.printStackTrace();
-            }
+        try {
+            // Shortcut/person icons and resource lookup must use the client
+            // package even when the optional MIUI notification hook is absent.
+            pkgCtx = context.createPackageContext(packageName, Context.CONTEXT_IGNORE_SECURITY);
+        } catch (PackageManager.NameNotFoundException ignored) {
         }
         return pkgCtx;
     }
@@ -304,8 +331,17 @@ public class MyMIPushNotificationHelper {
     private static NotificationCompat.Builder normalStyleNotificationBuilder(Context context, PushMetaInfo metaInfo) {
         String title = metaInfo.getTitle();
         String description = metaInfo.getDescription();
+        CustomConfiguration configuration = XMPushUtils.getConfiguration(metaInfo);
+        String styleType = configuration.notificationStyleType(null);
 
         Bitmap bigPic = getBigPic(context, metaInfo);
+        if ("3".equals(styleType)) {
+            bigPic = getBitmapFromUri(context,
+                    configuration.notificationBannerImageUri(null), 1 * MiB);
+        } else if ("4".equals(styleType)) {
+            bigPic = getBitmapFromUri(context,
+                    configuration.notificationColorfulButtonBackgroundImageUri(null), 1 * MiB);
+        }
 
         NotificationCompat.Builder notificationBuilder = new NotificationCompat.Builder(context);
         if (bigPic != null) {
@@ -313,11 +349,22 @@ public class MyMIPushNotificationHelper {
             style.bigPicture(bigPic);
             style.setBigContentTitle(title);
             notificationBuilder.setStyle(style);
-        } else if (description.length() > NOTIFICATION_BIG_STYLE_MIN_LEN) {
+        } else if ("1".equals(styleType)
+                || description.length() > NOTIFICATION_BIG_STYLE_MIN_LEN) {
             NotificationCompat.BigTextStyle style = new NotificationCompat.BigTextStyle();
             style.bigText(description);
             style.setBigContentTitle(title);
             notificationBuilder.setStyle(style);
+        }
+
+        if ("4".equals(styleType)) {
+            String background = configuration.notificationColorfulButtonBackgroundColor(null);
+            if (background != null) {
+                try {
+                    notificationBuilder.setColor(Color.parseColor(background));
+                } catch (IllegalArgumentException ignored) {
+                }
+            }
         }
 
         String[] titleAndDesp = determineTitleAndDespByDIP(context, metaInfo);
@@ -477,7 +524,8 @@ public class MyMIPushNotificationHelper {
         PushMetaInfo metaInfo = buildContainer.getMetaInfo();
         // Also carry along the target PendingIntent, whose target will get temporarily whitelisted for background-activity-start upon sent.
         final Intent targetIntent = buildTargetIntentWithoutExtras(buildContainer.getPackageName(), metaInfo);
-        final PendingIntent pi = PendingIntent.getService(xmPushService, 0, targetIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+        final PendingIntent pi = PendingIntent.getService(xmPushService, 0, targetIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         localBuilder.getExtras().putParcelable("mipush.target", pi);
     }
 
@@ -529,7 +577,9 @@ public class MyMIPushNotificationHelper {
 
             Intent sdkIntentJump = getSdkIntent(xmPushService, buildContainer);
             if (sdkIntentJump != null) {
-                PendingIntent pendingIntent = PendingIntent.getActivity(xmPushService, 0, sdkIntentJump, PendingIntent.FLAG_UPDATE_CURRENT);
+                PendingIntent pendingIntent = PendingIntent.getActivity(xmPushService, 0,
+                        sdkIntentJump,
+                        PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
                 localBuilder.addAction(new NotificationCompat.Action(i, "SDK Intent", pendingIntent));
             }
         }
@@ -546,7 +596,8 @@ public class MyMIPushNotificationHelper {
         Intent localIntent1 = packageManager.getLaunchIntentForPackage(packageName);
         if (localIntent1 != null) {
             localIntent1.addCategory(String.valueOf(paramPushMetaInfo.getNotifyId()));
-            return PendingIntent.getActivity(paramContext, 0, localIntent1, PendingIntent.FLAG_UPDATE_CURRENT);
+            return PendingIntent.getActivity(paramContext, 0, localIntent1,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         }
         return null;
     }
@@ -571,7 +622,8 @@ public class MyMIPushNotificationHelper {
             Intent intent = new Intent("android.intent.action.VIEW");
             intent.setData(Uri.parse(urlJump));
             intent.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
-            return PendingIntent.getActivity(context, notificationId, intent, PendingIntent.FLAG_UPDATE_CURRENT);
+            return PendingIntent.getActivity(context, notificationId, intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         }
 
         Intent intent = new Intent();
@@ -588,12 +640,14 @@ public class MyMIPushNotificationHelper {
         boolean useActivity = configuration.useClickedActivity(false);
         Intent activityIntent = getSdkIntent(context, container);
         if (!useActivity || activityIntent == null) {
-            return PendingIntent.getService(context, notificationId, intent, PendingIntent.FLAG_UPDATE_CURRENT);
+            return PendingIntent.getService(context, notificationId, intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         }
         activityIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         activityIntent.putExtra("mipush_serviceIntent", intent);
         activityIntent.putExtras(intent);
-        return PendingIntent.getActivity(context, notificationId, activityIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+        return PendingIntent.getActivity(context, notificationId, activityIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
     /**
@@ -726,9 +780,11 @@ public class MyMIPushNotificationHelper {
         localIntent.putExtra(FROM_NOTIFICATION, true);
         localIntent.addCategory(String.valueOf(paramPushMetaInfo.getNotifyId()));
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            return PendingIntent.getForegroundService(paramContext, 0, localIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+            return PendingIntent.getForegroundService(paramContext, 0, localIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         } else {
-            return PendingIntent.getService(paramContext, 0, localIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+            return PendingIntent.getService(paramContext, 0, localIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         }
     }
 
@@ -768,7 +824,7 @@ public class MyMIPushNotificationHelper {
         if (metaExtra == null || (intent = getPendingIntentFromExtra(context, pkgName, place, metaExtra)) == null) {
             return null;
         }
-        return PendingIntent.getActivity(context, 0, intent, 0);
+        return PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_IMMUTABLE);
     }
 
     private static Intent getPendingIntentFromExtra(Context context, String pkgName, int place, Map<String, String> extra) {

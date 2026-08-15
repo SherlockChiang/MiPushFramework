@@ -28,7 +28,7 @@ public class CustomConfigurationTest {
     }
 
     @Test
-    public void focusPayloadKeepsAtMostTenDistinctHttpsPictures() {
+    public void focusPayloadForwardsAllPicturesButCapsNativeDownloads() {
         Map<String, String> extras = new LinkedHashMap<>();
         extras.put("miui.focus.param", "{\"ticker\":\"parcel\"}");
         extras.put("miui.focus.pic_http", "http://example.com/not-allowed.png");
@@ -42,7 +42,7 @@ public class CustomConfigurationTest {
 
         assertTrue(payload.isUsable());
         assertEquals("{\"ticker\":\"parcel\"}", payload.parameter());
-        assertEquals(CustomConfiguration.FOCUS_PICTURE_MAX_COUNT,
+        assertEquals(12,
                 payload.pictureUrls().size());
         assertEquals("https://example.com/0.png",
                 payload.pictureUrls().get("miui.focus.pic_0"));
@@ -51,9 +51,61 @@ public class CustomConfigurationTest {
                         "miui.focus.pic_3", "miui.focus.pic_4", "miui.focus.pic_5",
                         "miui.focus.pic_6", "miui.focus.pic_7", "miui.focus.pic_8",
                         "miui.focus.pic_9"),
-                new ArrayList<>(payload.pictureUrls().keySet()));
+                new ArrayList<>(payload.downloadPictureUrls().keySet()));
         assertFalse(payload.pictureUrls().containsKey("miui.focus.pic_http"));
         assertFalse(payload.pictureUrls().containsKey("miui.focus.pic_malformed"));
+        assertTrue(payload.pictureUrls().containsKey("miui.focus.pic_10"));
+        assertTrue(payload.pictureUrls().containsKey("miui.focus.pic_11"));
+    }
+
+    @Test
+    public void focusPayloadRejectsUrlsWithUserInfoEmptyHostAndWhitespace() {
+        Map<String, String> extras = new LinkedHashMap<>();
+        extras.put("miui.focus.param", "{\"ticker\":\"url-tests\"}");
+        extras.put("miui.focus.pic_1", "https://user:pass@example.com/pic.png");
+        extras.put("miui.focus.pic_2", "https:///pic.png");
+        extras.put("miui.focus.pic_3", "https://?query=1");
+        extras.put("miui.focus.pic_4", "https://example .com/pic.png");
+        extras.put("miui.focus.pic_5", "https://example\t.com/pic.png");
+        extras.put("miui.focus.pic_6", "https://valid.example.com/image.png");
+
+        CustomConfiguration.FocusNotificationPayload payload =
+                new CustomConfiguration(extras).focusNotificationPayload();
+
+        assertTrue(payload.isUsable());
+        assertEquals(1, payload.pictureUrls().size());
+        assertTrue(payload.pictureUrls().containsKey("miui.focus.pic_6"));
+        assertEquals("https://valid.example.com/image.png", payload.pictureUrls().get("miui.focus.pic_6"));
+        assertFalse(payload.pictureUrls().containsKey("miui.focus.pic_1"));
+        assertFalse(payload.pictureUrls().containsKey("miui.focus.pic_2"));
+        assertFalse(payload.pictureUrls().containsKey("miui.focus.pic_3"));
+        assertFalse(payload.pictureUrls().containsKey("miui.focus.pic_4"));
+        assertFalse(payload.pictureUrls().containsKey("miui.focus.pic_5"));
+    }
+
+    @Test
+    public void focusPayloadAcceptsPlatformResourceUris() {
+        Map<String, String> extras = new LinkedHashMap<>();
+        extras.put("miui.focus.pic_content", "content://com.example.app/image/1");
+        extras.put("miui.focus.pic_resource", "android.resource://com.example.app/drawable/icon");
+
+        CustomConfiguration.FocusNotificationPayload payload =
+                new CustomConfiguration(extras).focusNotificationPayload();
+
+        assertTrue(payload.isUsable());
+        assertEquals(2, payload.pictureUrls().size());
+        assertEquals(2, payload.downloadPictureUrls().size());
+    }
+
+    @Test
+    public void focusPicturesCanBeUsedWithoutParameterLikeOfficialClient() {
+        Map<String, String> extras = new HashMap<>();
+        extras.put("miui.focus.pic_0", "content://com.example.app/image/1");
+
+        CustomConfiguration.FocusNotificationPayload payload =
+                new CustomConfiguration(extras).focusNotificationPayload();
+
+        assertTrue(payload.isUsable());
     }
 
     @Test
@@ -153,6 +205,24 @@ public class CustomConfigurationTest {
         assertTrue(custom.notificationShowWhen(false));
         extras.remove("notification_show_when");
         assertTrue(custom.notificationShowWhen(true));
+    }
+
+    @Test
+    public void officialHyperOsNotificationMetadataUsesPublishedKeys() {
+        Map<String, String> extras = new HashMap<>();
+        extras.put("notification_style_type", "4");
+        extras.put("notification_timeout", "30");
+        extras.put("notification_small_icon_uri", "content://com.example/icon");
+        extras.put("enable_keyguard", "false");
+        extras.put("miui.fold.timeout", "12");
+
+        CustomConfiguration custom = new CustomConfiguration(extras);
+
+        assertEquals("4", custom.notificationStyleType(null));
+        assertEquals(30, custom.notificationTimeoutSeconds(0));
+        assertEquals("content://com.example/icon", custom.notificationSmallIconUri(null));
+        assertFalse(custom.enableKeyguard(true));
+        assertEquals(12, custom.miuiFoldTimeoutSeconds(0));
     }
 
     @Test

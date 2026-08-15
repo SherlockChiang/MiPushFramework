@@ -1,23 +1,29 @@
 package top.trumeet.mipushframework.main
 
+import android.Manifest
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.tooling.preview.Preview
@@ -29,6 +35,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.nihility.Global
 import com.xiaomi.xmsf.R
 import top.trumeet.mipushframework.MainPageUtils
 import top.trumeet.mipushframework.component.MiuixBottomNavigation
@@ -41,43 +48,78 @@ import top.trumeet.mipushframework.main.subpage.EventList
 import top.trumeet.mipushframework.main.subpage.EventListPreview
 import top.trumeet.mipushframework.main.subpage.Settings
 import top.trumeet.mipushframework.main.subpage.SettingsPagePreview
+import top.trumeet.mipushframework.utils.NotificationPermissionController
 import top.trumeet.ui.theme.Theme
 import top.yukonga.miuix.kmp.basic.NavigationItem
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-private val mainPageUtils1 = MainPageUtils()
 private var placeholder by mutableStateOf("Search...")
 
 class MainPage : ComponentActivity() {
+    private val mainPageUtils = MainPageUtils()
+    private var notificationPermissionAttempted = false
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        NotificationPermissionController.markRequested(this)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        mainPageUtils1.initOnCreate(applicationContext) { placeholder = it.toString() }
+        mainPageUtils.initOnCreate(applicationContext) { placeholder = it.toString() }
         setContent {
             Theme {
                 window.navigationBarColor = MiuixTheme.colorScheme.surfaceContainer.toArgb()
-                Main(Screen.Apps.route.toString()) {
-                    {
-                        composable(Screen.Events.route.toString()) {
-                            Column {
-                                var query by rememberSaveable { mutableStateOf("") }
-                                SearchBar(placeholder) { query = it }
-                                EventList(query)
-                            }
+                var floatingBottomNav by rememberSaveable {
+                    mutableStateOf(Global.ConfigCenter().isFloatingBottomNavigation(applicationContext))
+                }
+                Main(
+                    startDestination = Screen.Apps.route.toString(),
+                    floatingBottomNav = floatingBottomNav,
+                ) {
+                    composable(Screen.Events.route.toString()) {
+                        Column {
+                            var query by rememberSaveable { mutableStateOf("") }
+                            SearchBar(placeholder) { query = it }
+                            EventList(query)
                         }
-                        composable(Screen.Apps.route.toString()) {
-                            Column {
-                                var query by rememberSaveable { mutableStateOf("") }
-                                SearchBar(placeholder) { query = it }
-                                ApplicationList(query)
-                            }
+                    }
+                    composable(Screen.Apps.route.toString()) {
+                        Column {
+                            var query by rememberSaveable { mutableStateOf("") }
+                            SearchBar(placeholder) { query = it }
+                            ApplicationList(query)
                         }
-                        composable(Screen.Settings.route.toString()) { Settings() }
+                    }
+                    composable(Screen.Settings.route.toString()) {
+                        Settings(
+                            floatingBottomNav = floatingBottomNav,
+                            onFloatingBottomNavChange = { enabled ->
+                                floatingBottomNav = enabled
+                                Global.ConfigCenter().setFloatingBottomNavigation(applicationContext, enabled)
+                            }
+                        )
                     }
                 }
             }
         }
+    }
+
+    override fun onPostResume() {
+        super.onPostResume()
+        if (!notificationPermissionAttempted &&
+            NotificationPermissionController.shouldAutoRequest(this)
+        ) {
+            notificationPermissionAttempted = true
+            NotificationPermissionController.markRequested(this)
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        mainPageUtils.close()
     }
 }
 
@@ -163,7 +205,11 @@ private val settingsIcon = ImageVector.Builder(
 }.build()
 
 @Composable
-fun BottomNavigationBar(navController: NavController) {
+fun BottomNavigationBar(
+    navController: NavController,
+    modifier: Modifier = Modifier,
+    floating: Boolean = true,
+) {
     val items = listOf(
         Screen.Events, Screen.Apps, Screen.Settings
     )
@@ -179,6 +225,7 @@ fun BottomNavigationBar(navController: NavController) {
     val selected = items.indexOfFirst { it.route.toString() == currentRoute }.coerceAtLeast(0)
 
     MiuixBottomNavigation(
+        modifier = modifier,
         items = navigationItems,
         selected = selected,
         onClick = { index ->
@@ -189,27 +236,52 @@ fun BottomNavigationBar(navController: NavController) {
                 restoreState = true
             }
         },
+        floating = floating,
     )
 }
 
 @Composable
 private fun Main(
     startDestination: String,
-    navContent: () -> NavGraphBuilder.() -> Unit
+    floatingBottomNav: Boolean = true,
+    navContent: NavGraphBuilder.() -> Unit
 ) {
     val navController = rememberNavController()
 
     MiuixPageScaffold(
         modifier = Modifier.fillMaxSize(),
-        bottomBar = { BottomNavigationBar(navController) },
+        bottomBar = {
+            if (floatingBottomNav) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 18.dp, vertical = 10.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    BottomNavigationBar(
+                        navController = navController,
+                        modifier = Modifier.fillMaxWidth(),
+                        floating = true,
+                    )
+                }
+            } else {
+                BottomNavigationBar(
+                    navController = navController,
+                    modifier = Modifier.fillMaxWidth(),
+                    floating = false,
+                )
+            }
+        },
     ) { paddingValues ->
         NavHost(
             modifier = Modifier
+                .fillMaxSize()
                 .padding(paddingValues)
                 .consumeWindowInsets(paddingValues),
             navController = navController,
             startDestination = startDestination,
-            builder = navContent()
+            builder = navContent
         )
     }
 }
@@ -221,17 +293,15 @@ private fun Main(
 @Composable
 private fun MainEventsPreview() {
     Main(Screen.Events.route.toString()) {
-        {
-            composable(Screen.Events.route.toString()) {
-                Column {
-                    val onValueChange: (String) -> Unit = {}
-                    SearchBar(placeholder, onValueChange)
-                    EventListPreview()
-                }
+        composable(Screen.Events.route.toString()) {
+            Column {
+                val onValueChange: (String) -> Unit = {}
+                SearchBar(placeholder, onValueChange)
+                EventListPreview()
             }
-            composable(Screen.Apps.route.toString()) { }
-            composable(Screen.Settings.route.toString()) { }
         }
+        composable(Screen.Apps.route.toString()) { }
+        composable(Screen.Settings.route.toString()) { }
     }
 }
 
@@ -242,17 +312,15 @@ private fun MainEventsPreview() {
 @Composable
 private fun MainAppsPreview() {
     Main(Screen.Apps.route.toString()) {
-        {
-            composable(Screen.Events.route.toString()) { }
-            composable(Screen.Apps.route.toString()) {
-                Column {
-                    val onValueChange: (String) -> Unit = {}
-                    SearchBar(placeholder, onValueChange)
-                    ApplicationListPreview()
-                }
+        composable(Screen.Events.route.toString()) { }
+        composable(Screen.Apps.route.toString()) {
+            Column {
+                val onValueChange: (String) -> Unit = {}
+                SearchBar(placeholder, onValueChange)
+                ApplicationListPreview()
             }
-            composable(Screen.Settings.route.toString()) { }
         }
+        composable(Screen.Settings.route.toString()) { }
     }
 }
 
@@ -263,11 +331,9 @@ private fun MainAppsPreview() {
 @Composable
 private fun MainSettingsPreview() {
     Main(Screen.Settings.route.toString()) {
-        {
-            composable(Screen.Events.route.toString()) { }
-            composable(Screen.Apps.route.toString()) { }
-            composable(Screen.Settings.route.toString()) { SettingsPagePreview() }
-        }
+        composable(Screen.Events.route.toString()) { }
+        composable(Screen.Apps.route.toString()) { }
+        composable(Screen.Settings.route.toString()) { SettingsPagePreview() }
     }
 }
 
@@ -278,12 +344,10 @@ private fun MainSettingsPreview() {
 @Composable
 private fun MainDialogPreview() {
     Main(Screen.Events.route.toString()) {
-        {
-            composable(Screen.Events.route.toString()) {
-                EventDetailsDialogPreview()
-            }
-            composable(Screen.Apps.route.toString()) { }
-            composable(Screen.Settings.route.toString()) { }
+        composable(Screen.Events.route.toString()) {
+            EventDetailsDialogPreview()
         }
+        composable(Screen.Apps.route.toString()) { }
+        composable(Screen.Settings.route.toString()) { }
     }
 }

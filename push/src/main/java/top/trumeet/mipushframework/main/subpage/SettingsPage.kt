@@ -1,5 +1,7 @@
 package top.trumeet.mipushframework.main.subpage
 
+import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -18,8 +20,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
+import com.nihility.Global
 import com.nihility.InternalMessenger
 import com.xiaomi.push.service.XMPushServiceMessenger
 import com.xiaomi.xmsf.R
@@ -32,30 +36,62 @@ import top.trumeet.mipushframework.component.MiuixActionButton
 import top.trumeet.mipushframework.component.MiuixInput
 import top.trumeet.mipushframework.main.AdvancedSettingsPage
 import top.trumeet.mipushframework.main.HelpPage
+import top.trumeet.mipushframework.utils.NotificationPermissionController
+import top.trumeet.mipushframework.utils.NotificationPermissionPolicy
 import top.trumeet.ui.theme.Theme
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-fun Settings() {
+fun Settings(
+    floatingBottomNav: Boolean = true,
+    onFloatingBottomNavChange: ((Boolean) -> Unit)? = null,
+) {
     Surface(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState()),
         color = MiuixTheme.colorScheme.background
     ) {
-        SettingsScreen()
+        SettingsScreen(
+            floatingBottomNav = floatingBottomNav,
+            onFloatingBottomNavChange = onFloatingBottomNavChange,
+        )
     }
 }
 
 
 @Composable
-private fun SettingsScreen() {
+private fun SettingsScreen(
+    floatingBottomNav: Boolean,
+    onFloatingBottomNavChange: ((Boolean) -> Unit)?,
+) {
     Column {
+        AppearanceBlock(
+            floatingBottomNav = floatingBottomNav,
+            onFloatingBottomNavChange = onFloatingBottomNavChange,
+        )
         ServiceConfigurationBlock()
         DebugBlock()
         AboutBlock()
+    }
+}
+
+@Composable
+private fun AppearanceBlock(
+    floatingBottomNav: Boolean,
+    onFloatingBottomNavChange: ((Boolean) -> Unit)?,
+) {
+    SettingsGroup(title = stringResource(R.string.settings_appearance)) {
+        SettingsItem(
+            title = stringResource(R.string.settings_floating_bottom_navigation),
+            summary = stringResource(R.string.settings_floating_bottom_navigation_summary),
+            checked = floatingBottomNav,
+            onClick = {
+                onFloatingBottomNavChange?.invoke(!floatingBottomNav)
+            }
+        )
     }
 }
 
@@ -71,8 +107,67 @@ private fun ServiceConfigurationBlock() {
             context.startActivity(Intent(context, AdvancedSettingsPage::class.java))
         }
 
+        NotificationPermissionItem()
         SetConfigurationsDirectory()
         SetXMPPServer(context)
+    }
+}
+
+@Composable
+private fun NotificationPermissionItem() {
+    val context = LocalContext.current
+    val activity = context as? Activity
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var status by remember {
+        mutableStateOf(
+            activity?.let { NotificationPermissionController.status(it) }
+                ?: NotificationPermissionPolicy.Status.BLOCKED
+        )
+    }
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) {
+        NotificationPermissionController.markRequested(context)
+        if (activity != null) {
+            status = NotificationPermissionController.status(activity)
+        }
+    }
+
+    DisposableEffect(lifecycleOwner, activity) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && activity != null) {
+                status = NotificationPermissionController.status(activity)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val summary = when (status) {
+        NotificationPermissionPolicy.Status.NOT_REQUIRED ->
+            stringResource(R.string.settings_notification_permission_not_required)
+        NotificationPermissionPolicy.Status.GRANTED ->
+            stringResource(R.string.settings_notification_permission_granted)
+        NotificationPermissionPolicy.Status.REQUESTABLE ->
+            stringResource(R.string.settings_notification_permission_request)
+        NotificationPermissionPolicy.Status.DENIED_CAN_ASK_AGAIN ->
+            stringResource(R.string.settings_notification_permission_denied)
+        NotificationPermissionPolicy.Status.BLOCKED ->
+            stringResource(R.string.settings_notification_permission_blocked)
+    }
+
+    SettingsItem(
+        title = stringResource(R.string.settings_notification_permission),
+        summary = summary,
+    ) {
+        when (status) {
+            NotificationPermissionPolicy.Status.REQUESTABLE,
+            NotificationPermissionPolicy.Status.DENIED_CAN_ASK_AGAIN -> {
+                NotificationPermissionController.markRequested(context)
+                launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            else -> NotificationPermissionController.openNotificationSettings(context)
+        }
     }
 }
 
@@ -123,26 +218,24 @@ private fun SetXMPPServer(context: Context) {
 @Composable
 private fun SetConfigurationsDirectory() {
     val context = LocalContext.current
-    var selectedDirectoryUri by remember {
-        mutableStateOf(
-            SettingUtils.getConfigurationDirectory(
-                context
-            )
-        )
-    }
-    val openDocumentTreeLauncher = rememberLauncherForActivityResult(
+    val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
         if (uri != null) {
-            selectedDirectoryUri = uri
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
             SettingUtils.setConfigurationDirectory(context, uri)
+            Global.ConfigCenter().loadConfigurations(context)
         }
     }
+
     SettingsItem(
         title = stringResource(R.string.settings_configuration_directory),
-        summary = selectedDirectoryUri?.toString()
+        summary = SettingUtils.getConfigurationDirectory(context)?.path
     ) {
-        openDocumentTreeLauncher.launch(null) // 启动文件选择器
+        launcher.launch(null)
     }
 }
 
@@ -199,4 +292,3 @@ fun SettingsPagePreview() {
     Utils.context = LocalContext.current
     Settings()
 }
-

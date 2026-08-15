@@ -46,8 +46,8 @@ public class PermissionUtils {
             Intent intent = new Intent(Intent.ACTION_SHOW_APP_INFO)
                     .setClassName("rikka.appops", "rikka.appops.appdetail.AppDetailActivity")
                     .putExtra("rikka.appops.intent.extra.USER_HANDLE", Utils.myUid())
-                    .putExtra("rikka.appops.intent.extra.PACKAGE_NAME", Constants.SERVICE_APP_NAME)
-                    .setData(Uri.parse("package:" + Constants.SERVICE_APP_NAME))
+                    .putExtra("rikka.appops.intent.extra.PACKAGE_NAME", context.getPackageName())
+                    .setData(Uri.parse("package:" + context.getPackageName()))
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             context.startActivity(intent);
             Toast.makeText(context, tips, Toast.LENGTH_LONG).show();
@@ -58,8 +58,9 @@ public class PermissionUtils {
     }
 
     public static boolean allowPermission(String permission) {
+        Context context = Utils.getApplication();
         return ShellUtils.exec("appops set --user " + Utils.myUid() +
-                " " + Constants.SERVICE_APP_NAME + " " + permission +
+                " " + context.getPackageName() + " " + permission +
                 " " + AppOpsManager.MODE_ALLOWED);
     }
 }

@@ -13,9 +13,9 @@ import com.xiaomi.channel.commonutils.android.MIUIUtils;
 import com.xiaomi.push.service.XMPushServiceMessenger;
 import com.xiaomi.smack.ConnectionConfiguration;
 
-public class MainPageUtils {
+public class MainPageUtils implements AutoCloseable {
     private static final String TAG = MainPageUtils.class.getSimpleName();
-    InternalMessenger messenger;
+    private InternalMessenger messenger;
 
     public interface ConnectionStatusChanged {
         void onChange(XMPushServiceListener.ConnectionStatus status);
@@ -24,13 +24,21 @@ public class MainPageUtils {
     public MainPageUtils() {
     }
 
-    public void initOnCreate(Context context, ConnectionStatusChanged connectionStatusChanged) {
+    public synchronized void initOnCreate(Context context, ConnectionStatusChanged connectionStatusChanged) {
         context = context.getApplicationContext();
+        if (messenger != null) {
+            messenger.close();
+        }
         messenger = new InternalMessenger(context) {{
             register(new IntentFilter(XMPushServiceMessenger.IntentSetConnectionStatus));
             addListener(intent -> {
                 String status = intent.getStringExtra("status");
-                connectionStatusChanged.onChange(XMPushServiceListener.ConnectionStatus.valueOf(status));
+                if (status != null && connectionStatusChanged != null) {
+                    try {
+                        connectionStatusChanged.onChange(XMPushServiceListener.ConnectionStatus.valueOf(status));
+                    } catch (Throwable ignored) {
+                    }
+                }
             });
         }};
 
@@ -39,6 +47,14 @@ public class MainPageUtils {
         Global.ConfigCenter().loadConfigurations(context);
 
         messenger.send(new Intent(XMPushServiceMessenger.IntentGetConnectionStatus));
+    }
+
+    @Override
+    public synchronized void close() {
+        if (messenger != null) {
+            messenger.close();
+            messenger = null;
+        }
     }
 
     void printHookResultForCheck() {

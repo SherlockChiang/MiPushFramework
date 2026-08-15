@@ -62,7 +62,9 @@ public class SettingUtils {
     }
 
     public static void startMiPushServiceAsForegroundService(Context context) {
-        new InternalMessenger(context).send(new Intent(XMPushServiceMessenger.IntentStartForeground));
+        try (InternalMessenger messenger = new InternalMessenger(context)) {
+            messenger.send(new Intent(XMPushServiceMessenger.IntentStartForeground));
+        }
     }
 
     public static void notifyMockNotification(Context context) {
@@ -71,6 +73,14 @@ public class SettingUtils {
         String title = context.getString(R.string.debug_test_title);
         String description = context.getString(R.string.debug_test_content) + date.toString();
         NotificationController.test(context, packageName, title, description);
+    }
+
+    public static void notifyMockFocusNotification(Context context) {
+        String packageName = BuildConfig.APPLICATION_ID;
+        Date date = new Date();
+        String title = context.getString(R.string.debug_test_focus_title);
+        String description = context.getString(R.string.debug_test_focus_content) + date;
+        NotificationController.testFocus(context, packageName, title, description);
     }
 
     public static boolean isIceBoxInstalled() {
@@ -86,8 +96,9 @@ public class SettingUtils {
     }
 
     public static void sendXMPPReconnectRequest(Context context) {
-        new InternalMessenger(context).send(
-                new Intent(PushConstants.ACTION_RESET_CONNECTION));
+        try (InternalMessenger messenger = new InternalMessenger(context)) {
+            messenger.send(new Intent(PushConstants.ACTION_RESET_CONNECTION));
+        }
     }
 
     public static void setXMPPServer(Context context, String newHost) {
@@ -108,8 +119,7 @@ public class SettingUtils {
 
     public static void shareLogs(Context context) {
         context.startActivity(new Intent()
-                .setComponent(new ComponentName(Constants.SERVICE_APP_NAME,
-                        Constants.SHARE_LOG_COMPONENT_NAME)));
+                .setComponent(new ComponentName(context, ShareLogActivity.class)));
     }
 
     public static @NonNull Uri saveConfigurationUri(Context context, Intent data) {

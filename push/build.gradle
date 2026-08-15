@@ -3,7 +3,6 @@ apply plugin: 'kotlin-android'
 apply plugin: 'org.jetbrains.kotlin.plugin.compose'
 apply plugin: 'org.greenrobot.greendao'
 
-
 android {
     compileSdkVersion rootProject.ext.compileSdkVersion
 
@@ -28,6 +27,59 @@ android {
         }
 
         buildConfigField "String", "GIT_TAG", "\"" + rootProject.ext.gitTag + "\""
+        buildConfigField "boolean", "QA_BUILD", "false"
+        manifestPlaceholders = [
+                mipushReceivePermission: "com.xiaomi.xmsf.permission.MIPUSH_RECEIVE"
+        ]
+    }
+
+    signingConfigs {
+        debug {
+            v1SigningEnabled true
+            v2SigningEnabled true
+            enableV3Signing = true
+            enableV4Signing = true
+        }
+        qa {
+            initWith(signingConfigs.debug)
+        }
+        nihility {
+            v1SigningEnabled true
+            v2SigningEnabled true
+            enableV3Signing = true
+            enableV4Signing = true
+
+            def locale = project.rootProject.file(".yuuta.jks")
+            def keystorePwd = System.getenv("KEYSTORE_PASS")
+            def alias = System.getenv("ALIAS_NAME")
+            def pwd = System.getenv("ALIAS_PASS")
+            if (project.rootProject.file('local.properties').exists()) {
+                Properties properties = new Properties()
+                properties.load(project.rootProject.file('local.properties').newDataInputStream())
+                if (properties.getProperty("KEY_LOCATE") != null) {
+                    locale = properties.getProperty("KEY_LOCATE")
+                }
+                if (properties.getProperty("KEYSTORE_PASSWORD") != null) {
+                    keystorePwd = properties.getProperty("KEYSTORE_PASSWORD")
+                }
+                if (properties.getProperty("KEYSTORE_ALIAS") != null) {
+                    alias = properties.getProperty("KEYSTORE_ALIAS")
+                }
+                if (properties.getProperty("KEY_PASSWORD") != null) {
+                    pwd = properties.getProperty("KEY_PASSWORD")
+                }
+            }
+
+            if (locale != null) {
+                def keyFile = file(locale)
+                if (keyFile.exists()) {
+                    storeFile keyFile
+                    storePassword keystorePwd
+                    keyAlias alias
+                    keyPassword pwd
+                }
+            }
+        }
     }
 
     buildTypes {
@@ -35,9 +87,8 @@ android {
             signingConfig signingConfigs.debug
         }
         release {
-            signingConfig signingConfigs.debug
+            debuggable false
             minifyEnabled false
-            //shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
@@ -51,13 +102,33 @@ android {
     productFlavors {
         normal {
             dimension "version"
+            targetSdkVersion 34
+            versionCode 1003003001
+            signingConfig signingConfigs.nihility
+        }
+        qa {
+            dimension "version"
+            // Install beside a preloaded XMSF when its signing key is unavailable.
+            // This variant is intentionally limited to local UI/notification/perf QA.
+            applicationIdSuffix ".qa"
+            versionNameSuffix "-qa"
+            buildConfigField "boolean", "QA_BUILD", "true"
+            targetSdkVersion 34
+            manifestPlaceholders = [
+                    mipushReceivePermission: "com.xiaomi.xmsf.qa.permission.MIPUSH_RECEIVE"
+            ]
+            signingConfig signingConfigs.qa
         }
         vc105 {
             dimension "version"
             versionCode = 105
+            targetSdkVersion rootProject.ext.targetSdkVersion
+            signingConfig signingConfigs.nihility
         }
         prebuilt {
             dimension "version"
+            targetSdkVersion rootProject.ext.targetSdkVersion
+            signingConfig signingConfigs.nihility
         }
     }
     androidComponents {
@@ -75,34 +146,6 @@ android {
     }
     namespace 'top.trumeet.mipush.provider'
 
-    signingConfigs {
-        debug {
-            v1SigningEnabled true
-            v2SigningEnabled true
-            enableV3Signing = true
-            enableV4Signing = true
-
-            def locale = project.rootProject.file(".yuuta.jks")
-            def keystorePwd = System.getenv("KEYSTORE_PASS")
-            def alias = System.getenv("ALIAS_NAME")
-            def pwd = System.getenv("ALIAS_PASS")
-            if (project.rootProject.file('local.properties').exists()) {
-                Properties properties = new Properties()
-                properties.load(project.rootProject.file('local.properties').newDataInputStream())
-                locale = properties.getProperty("KEY_LOCATE")
-                keystorePwd = properties.getProperty("KEYSTORE_PASSWORD")
-                alias = properties.getProperty("KEYSTORE_ALIAS")
-                pwd = properties.getProperty("KEY_PASSWORD")
-            }
-
-            if (locale != null) {
-                storeFile file(locale)
-                storePassword keystorePwd
-                keyAlias alias
-                keyPassword pwd
-            }
-        }
-    }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_11
         targetCompatibility JavaVersion.VERSION_11
@@ -112,8 +155,6 @@ android {
     }
     lintOptions {
         checkReleaseBuilds false
-        // Or, if you prefer, you can continue to check for errors in release builds,
-        // but continue the build even when errors are found:
         abortOnError false
     }
 
@@ -121,6 +162,14 @@ android {
     buildFeatures {
         compose true
         buildConfig true
+    }
+    packagingOptions {
+        jniLibs {
+            // AGP 8.2 cannot page-align uncompressed JNI payloads for 16 KiB devices.
+            // Compressing them lets PackageManager extract them with the platform's
+            // native-library alignment and removes Android 15/16's compatibility dialog.
+            useLegacyPackaging true
+        }
     }
     composeOptions {
         // Kotlin 2.x uses the Compose compiler Gradle plugin.
@@ -134,6 +183,20 @@ android.applicationVariants.all { variant ->
         doLast { delete "${buildDir}/intermediates/classes/${variant.name}" + "/android" }
     }
     variant.getProcessJavaResourcesProvider().get().dependsOn(taskName)
+}
+
+gradle.taskGraph.whenReady { taskGraph ->
+    boolean requiresNihilityKey = taskGraph.allTasks.any { task ->
+        String name = task.name.toLowerCase()
+        (name.contains("normalrelease") || name.contains("vc105release")) &&
+                (name.startsWith("assemble") || name.startsWith("package") || name.startsWith("sign"))
+    }
+    if (requiresNihilityKey) {
+        def nihilityStore = android.signingConfigs.nihility.storeFile
+        if (nihilityStore == null || !nihilityStore.exists()) {
+            throw new GradleException("Official Nihility signing key (.yuuta.jks / KEY_LOCATE) is missing. Release build cannot proceed.")
+        }
+    }
 }
 
 dependencies {

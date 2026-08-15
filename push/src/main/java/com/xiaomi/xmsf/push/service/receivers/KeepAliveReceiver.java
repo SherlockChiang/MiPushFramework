@@ -5,15 +5,11 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.SystemClock;
 
-import androidx.core.content.ContextCompat;
-
 import com.elvishew.xlog.Logger;
 import com.elvishew.xlog.XLog;
 import com.xiaomi.channel.commonutils.logger.MyLog;
-import com.xiaomi.push.service.PushServiceConstants;
 import com.xiaomi.xmsf.push.control.PushControllerUtils;
-
-
+import com.xiaomi.xmsf.push.control.PushServiceDispatcher;
 
 /**
  * @author zts
@@ -36,6 +32,11 @@ public class KeepAliveReceiver extends BroadcastReceiver {
         if (!PushControllerUtils.isRegistrationRetryEnabled()) {
             return;
         }
+        // A live transport does not need a second start command on every screen
+        // wake. Avoid needless binder/service churn on HyperOS and third-party ROMs.
+        if (PushControllerUtils.isPushServiceRunning()) {
+            return;
+        }
         try {
             long nowElapsedRealtime = SystemClock.elapsedRealtime();
 
@@ -44,19 +45,8 @@ public class KeepAliveReceiver extends BroadcastReceiver {
             }
 
             lastActiveElapsedRealtime = nowElapsedRealtime;
-            long now = System.currentTimeMillis();
-
             logger.d("start service when " + intent.getAction());
-            Intent localIntent = new Intent(context, com.xiaomi.push.service.XMPushService.class);
-            localIntent.putExtra(PushServiceConstants.EXTRA_TIME_STAMP, now);
-            localIntent.setAction(PushServiceConstants.ACTION_CHECK_ALIVE);
-            if (!shouldUseForegroundStart(PushControllerUtils.isPushServiceRunning())) {
-                // The existing foreground service can receive a normal start command. Avoid
-                // asking Android to promote it again on every screen-on recovery check.
-                context.startService(localIntent);
-            } else {
-                ContextCompat.startForegroundService(context, localIntent);
-            }
+            PushServiceDispatcher.dispatchStart(context, false);
         } catch (Exception localException) {
             MyLog.e(localException);
         }

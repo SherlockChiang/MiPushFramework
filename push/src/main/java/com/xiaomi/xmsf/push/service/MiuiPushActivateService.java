@@ -14,6 +14,8 @@ import android.text.TextUtils;
 
 import com.elvishew.xlog.Logger;
 import com.elvishew.xlog.XLog;
+import com.xiaomi.xmsf.BuildConfig;
+import com.xiaomi.xmsf.push.control.PushControllerUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -37,6 +39,10 @@ public class MiuiPushActivateService extends IntentService {
     }
 
     public static void awakePushActivateService(Context context, String str) {
+        if (context == null || BuildConfig.QA_BUILD
+                || !PushControllerUtils.isPrefsEnable(context)) {
+            return;
+        }
         try {
             Intent intent = new Intent(context, MiuiPushActivateService.class);
             intent.setPackage(context.getPackageName());
@@ -86,6 +92,9 @@ public class MiuiPushActivateService extends IntentService {
     }
 
     protected void onHandleIntent(Intent intent) {
+        if (BuildConfig.QA_BUILD || !PushControllerUtils.isPrefsEnable(this)) {
+            return;
+        }
         if ("com.xiaomi.xmsf.push.SCAN".equals(intent.getAction())) {
             long j = 0;
             for (final String str : getPackages()) {

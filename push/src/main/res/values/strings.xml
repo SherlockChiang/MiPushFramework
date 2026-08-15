@@ -81,6 +81,10 @@
     <string name="settings_mock_notification_summary">Tap to send a simulated test message.</string>
     <string name="debug_test_title">This is Title</string>
     <string name="debug_test_content">This is Content</string>
+    <string name="settings_mock_focus_notification">Simulate focus notification</string>
+    <string name="settings_mock_focus_notification_summary">Send a notification carrying the official MIUI focus payload for compatibility testing.</string>
+    <string name="debug_test_focus_title">Focus notification test</string>
+    <string name="debug_test_focus_content">Focus payload generated at </string>
     <string name="accessibility_desc">Used for the alternate foreground application detection mode, higher compatibility, but poor performance.</string>
     <string name="settings_notify_on_register">Notify On App Register</string>
     <string name="settings_show_loaded_file_after_configurations_loaded">Show Loaded File After Configurations Loaded</string>
@@ -190,16 +194,24 @@ Please grant the <b>Run in the background or wake up</b> permissions.
         <item>@string/register_type_deny</item>
     </string-array>
 
-
     <string name="notification_channels">Notification Channels</string>
     <string name="notification_channels_delete">Delete</string>
     <string name="notification_channels_setting">Setting</string>
     <string name="notification_channels_copy_id">Copy ID</string>
 
     <!-- Settings -->
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_floating_bottom_navigation">Floating bottom navigation bar</string>
+    <string name="settings_floating_bottom_navigation_summary">Display navigation bar as a floating island with rounded corners</string>
     <string name="settings_enhance">Enhances</string>
     <string name="settings_service_setting">Push configs</string>
     <string name="settings_service_advance_setting">Advanced</string>
+    <string name="settings_notification_permission">Notification permission</string>
+    <string name="settings_notification_permission_not_required">Managed by Android notification settings on this system version.</string>
+    <string name="settings_notification_permission_granted">Allowed. Focus and standard notifications can be displayed.</string>
+    <string name="settings_notification_permission_request">Tap to allow notifications on Android 13 or later.</string>
+    <string name="settings_notification_permission_denied">Permission was denied. Tap to ask again.</string>
+    <string name="settings_notification_permission_blocked">Permission is blocked. Tap to open system notification settings.</string>
     <string name="settings_summary_service_advance_setting">Advanced configurations interface</string>
     <string name="settings_configuration_directory">Change configuration directory</string>
     <string name="settings_XMPP_server">Set XMPP server</string>
@@ -208,7 +220,6 @@ Please grant the <b>Run in the background or wake up</b> permissions.
     <string name="settings_debug">Debug</string>
     <string name="settings_get_log">Get debugging logs</string>
     <string name="settings_get_log_summary">Tap to sharing logs file, submit it to your issue if you can.</string>
-
 
     <!-- Recent Activity -->
     <string name="recent_activity_view">View recent events</string>

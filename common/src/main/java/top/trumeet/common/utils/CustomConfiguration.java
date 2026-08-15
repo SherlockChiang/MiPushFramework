@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -45,6 +46,22 @@ public class CustomConfiguration {
     private static final String NOTIFICATION_GROUP = "notification_group";
     private static final String NOTIFICATION_BIGPIC_URI = "notification_bigPic_uri";
     private static final String NOTIFICATION_SHOW_WHEN = "notification_show_when";
+    private static final String NOTIFICATION_STYLE_TYPE = "notification_style_type";
+    private static final String NOTIFICATION_BANNER_IMAGE_URI = "notification_banner_image_uri";
+    private static final String NOTIFICATION_BANNER_ICON_URI = "notification_banner_icon_uri";
+    private static final String NOTIFICATION_COLORFUL_BUTTON_TEXT = "notification_colorful_button_text";
+    private static final String NOTIFICATION_COLORFUL_BUTTON_BG_COLOR = "notification_colorful_button_bg_color";
+    private static final String NOTIFICATION_COLORFUL_BUTTON_BG_IMAGE_URI = "notification_colorful_button_bg_image_uri";
+    private static final String NOTIFICATION_CUSTOM_SMALL_ICON_URI = "notification_custom_small_icon_uri";
+    private static final String NOTIFICATION_SMALL_ICON_URI = "notification_small_icon_uri";
+    private static final String NOTIFICATION_SMALL_ICON_COLOR = "notification_small_icon_color";
+    private static final String IMAGE_DESCRIPTION = "img_describe";
+    private static final String NOTIFICATION_TIMEOUT = "notification_timeout";
+    private static final String NOTIFICATION_BACKGROUND_COLOR = "background_color";
+    private static final String ENABLE_KEYGUARD = "enable_keyguard";
+    private static final String ENABLE_FLOAT = "enable_float";
+    private static final String NOTIFICATION_FOLD = "notification_fold";
+    private static final String MIUI_FOLD_TIMEOUT = "miui.fold.timeout";
     private static final String FOCUS_PARAM = "miui.focus.param";
     private static final String FOCUS_PICTURE_PREFIX = "miui.focus.pic_";
 
@@ -166,6 +183,70 @@ public class CustomConfiguration {
         return getBooleanValue(NOTIFICATION_SHOW_WHEN, defaultValue);
     }
 
+    public String notificationStyleType(String defaultValue) {
+        return get(NOTIFICATION_STYLE_TYPE, defaultValue);
+    }
+
+    public String notificationBannerImageUri(String defaultValue) {
+        return get(NOTIFICATION_BANNER_IMAGE_URI, defaultValue);
+    }
+
+    public String notificationBannerIconUri(String defaultValue) {
+        return get(NOTIFICATION_BANNER_ICON_URI, defaultValue);
+    }
+
+    public String notificationColorfulButtonText(String defaultValue) {
+        return get(NOTIFICATION_COLORFUL_BUTTON_TEXT, defaultValue);
+    }
+
+    public String notificationColorfulButtonBackgroundColor(String defaultValue) {
+        return get(NOTIFICATION_COLORFUL_BUTTON_BG_COLOR, defaultValue);
+    }
+
+    public String notificationColorfulButtonBackgroundImageUri(String defaultValue) {
+        return get(NOTIFICATION_COLORFUL_BUTTON_BG_IMAGE_URI, defaultValue);
+    }
+
+    public String notificationCustomSmallIconUri(String defaultValue) {
+        return get(NOTIFICATION_CUSTOM_SMALL_ICON_URI, defaultValue);
+    }
+
+    public String notificationSmallIconUri(String defaultValue) {
+        return get(NOTIFICATION_SMALL_ICON_URI, defaultValue);
+    }
+
+    public String notificationSmallIconColor(String defaultValue) {
+        return get(NOTIFICATION_SMALL_ICON_COLOR, defaultValue);
+    }
+
+    public String imageDescription(String defaultValue) {
+        return get(IMAGE_DESCRIPTION, defaultValue);
+    }
+
+    public int notificationTimeoutSeconds(int defaultValue) {
+        return boundedInt(NOTIFICATION_TIMEOUT, defaultValue, 0, 7 * 24 * 60 * 60);
+    }
+
+    public String notificationBackgroundColor(String defaultValue) {
+        return get(NOTIFICATION_BACKGROUND_COLOR, defaultValue);
+    }
+
+    public boolean enableKeyguard(boolean defaultValue) {
+        return getBooleanValue(ENABLE_KEYGUARD, defaultValue);
+    }
+
+    public boolean enableFloat(boolean defaultValue) {
+        return getBooleanValue(ENABLE_FLOAT, defaultValue);
+    }
+
+    public boolean notificationFold(boolean defaultValue) {
+        return getBooleanValue(NOTIFICATION_FOLD, defaultValue);
+    }
+
+    public int miuiFoldTimeoutSeconds(int defaultValue) {
+        return boundedInt(MIUI_FOLD_TIMEOUT, defaultValue, 0, 7 * 24 * 60 * 60);
+    }
+
     public boolean clearGroup(boolean defaultValue) {
         return get(CLEAR_GROUP, defaultValue);
     }
@@ -191,7 +272,8 @@ public class CustomConfiguration {
         for (Map.Entry<String, String> entry : mExtra.entrySet()) {
             String key = entry.getKey();
             String value = entry.getValue();
-            if (key != null && key.startsWith(FOCUS_PICTURE_PREFIX) && isHttpsUrl(value)) {
+            if (key != null && key.startsWith(FOCUS_PICTURE_PREFIX)
+                    && isSupportedPictureValue(value)) {
                 pictureEntries.add(entry);
             }
         }
@@ -200,9 +282,8 @@ public class CustomConfiguration {
 
         Map<String, String> pictures = new LinkedHashMap<>();
         for (Map.Entry<String, String> entry : pictureEntries) {
-            if (pictures.size() >= FOCUS_PICTURE_MAX_COUNT) {
-                break;
-            }
+            // The URL part of the protocol is forwarded in full. The native Icon
+            // bundle is deliberately capped separately by downloadPictureUrls().
             pictures.put(entry.getKey(), entry.getValue());
         }
         return new FocusNotificationPayload(parameter, pictures);
@@ -268,11 +349,23 @@ public class CustomConfiguration {
         return Integer.compare(left.length() - leftIndex, right.length() - rightIndex);
     }
 
-    private static boolean isHttpsUrl(@Nullable String value) {
-        if (value == null || !value.regionMatches(true, 0, "https://", 0, 8)) {
+    private static boolean isSupportedPictureValue(@Nullable String value) {
+        if (value == null) {
             return false;
         }
-        int authorityStart = 8;
+        String lower = value.toLowerCase(Locale.ROOT);
+        int authorityStart;
+        if (lower.startsWith("https://")) {
+            authorityStart = 8;
+        } else if (lower.startsWith("content://")) {
+            // Official XMSF accepts content/resource URIs and lets the platform
+            // resolver enforce the caller's grants. Do not accept file:// paths.
+            authorityStart = 10;
+        } else if (lower.startsWith("android.resource://")) {
+            authorityStart = 19;
+        } else {
+            return false;
+        }
         int authorityEnd = value.length();
         for (char delimiter : new char[]{'/', '?', '#'}) {
             int index = value.indexOf(delimiter, authorityStart);
@@ -284,8 +377,8 @@ public class CustomConfiguration {
             return false;
         }
         String authority = value.substring(authorityStart, authorityEnd);
-        // User-info and whitespace are unnecessary for CDN image URLs and can make
-        // an apparently HTTPS value resolve somewhere unexpected.
+        // User-info and whitespace are unnecessary for network/resource values and
+        // can make an apparently valid URI resolve somewhere unexpected.
         return authority.indexOf('@') < 0 && !containsAsciiWhitespace(authority);
     }
 
@@ -318,8 +411,23 @@ public class CustomConfiguration {
             return pictureUrls;
         }
 
+        /** URLs selected for native Icon downloads; the URL payload remains complete. */
+        public Map<String, String> downloadPictureUrls() {
+            if (pictureUrls.size() <= FOCUS_PICTURE_MAX_COUNT) {
+                return pictureUrls;
+            }
+            Map<String, String> result = new LinkedHashMap<>();
+            for (Map.Entry<String, String> entry : pictureUrls.entrySet()) {
+                if (result.size() >= FOCUS_PICTURE_MAX_COUNT) {
+                    break;
+                }
+                result.put(entry.getKey(), entry.getValue());
+            }
+            return Collections.unmodifiableMap(result);
+        }
+
         public boolean isUsable() {
-            return parameter != null;
+            return parameter != null || !pictureUrls.isEmpty();
         }
 
         public static boolean isSupportedProtocolVersion(int version) {
@@ -366,6 +474,19 @@ public class CustomConfiguration {
             return new HashSet<>();
         }
         return mExtra.keySet();
+    }
+
+    private int boundedInt(String key, int defaultValue, int min, int max) {
+        String value = get(key, null);
+        if (value == null) {
+            return defaultValue;
+        }
+        try {
+            int parsed = Integer.parseInt(value);
+            return parsed >= min && parsed <= max ? parsed : defaultValue;
+        } catch (NumberFormatException ignored) {
+            return defaultValue;
+        }
     }
 
     private static String getExtraField(Map<String, String> extra, String extraChannelName, String defaultValue) {

@@ -64,7 +64,7 @@ public class AppConfigurationUtils {
 
     void gotoNotificationSettingPage() {
         context.startActivity(new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                .putExtra(Settings.EXTRA_APP_PACKAGE, Constants.SERVICE_APP_NAME));
+                .putExtra(Settings.EXTRA_APP_PACKAGE, context.getPackageName()));
     }
 
     static void removeAllNonMIPushGroup(List<NotificationChannelGroup> groups, String mipushGroup) {

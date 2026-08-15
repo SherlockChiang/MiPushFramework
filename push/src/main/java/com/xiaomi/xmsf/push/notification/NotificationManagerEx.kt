@@ -13,12 +13,14 @@ object NotificationManagerEx {
     private const val TAG = "NotificationManagerEx"
 
     private lateinit var notificationManager: NotificationManager
+    private lateinit var notificationContext: Context
 
     @JvmField
     var isHooked: Boolean = false
 
     @JvmStatic
     fun init(context: Context) {
+        notificationContext = context.applicationContext
         notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     }
 
@@ -27,7 +29,34 @@ object NotificationManagerEx {
         tag: String?, id: Int, notification: Notification
     ) {
         XLog.d(TAG, "notify() called with: packageName = $packageName, tag = $tag, id = $id, notification = $notification")
-        notificationManager.notify(tag, id, notification)
+        if (!notifyAsPackage(packageName, tag, id, notification)) {
+            notificationManager.notify(tag, id, notification)
+        }
+    }
+
+    private fun notifyAsPackage(
+        packageName: String,
+        tag: String?,
+        id: Int,
+        notification: Notification,
+    ): Boolean {
+        if (!::notificationContext.isInitialized || packageName == notificationContext.packageName) {
+            return false
+        }
+        return try {
+            val method = notificationManager.javaClass.getDeclaredMethod(
+                "notifyAsPackage",
+                String::class.java,
+                String::class.java,
+                Int::class.javaPrimitiveType,
+                Notification::class.java,
+            )
+            method.isAccessible = true
+            method.invoke(notificationManager, packageName, tag, id, notification)
+            true
+        } catch (ignored: Throwable) {
+            false
+        }
     }
 
     fun cancel(

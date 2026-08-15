@@ -5,8 +5,6 @@ import android.content.Context;
 import android.os.Build;
 import android.os.PowerManager;
 
-import top.trumeet.common.Constants;
-
 /**
  * Created by Trumeet on 2017/8/25.
  * A util class to check XMPush accessibility
@@ -26,6 +24,6 @@ public class PushServiceAccessibility {
             return true;
         }
         PowerManager powerManager = context.getSystemService(PowerManager.class);
-        return powerManager.isIgnoringBatteryOptimizations(Constants.SERVICE_APP_NAME);
+        return powerManager.isIgnoringBatteryOptimizations(context.getPackageName());
     }
 }
