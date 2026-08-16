@@ -21,6 +21,7 @@ import android.os.Bundle;
 import android.provider.Settings;
 import android.service.notification.StatusBarNotification;
 import android.text.TextUtils;
+import android.util.LruCache;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -49,19 +50,21 @@ import java.util.List;
 import java.util.Map;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import top.trumeet.common.utils.CustomConfiguration;
 import top.trumeet.common.utils.ImgUtils;
+import top.trumeet.common.utils.NotificationMetadata;
 import top.trumeet.mipushframework.main.AdvancedSettingsPage;
 
 /**
@@ -207,10 +210,19 @@ public class NotificationController {
             String packageName,
             NotificationCompat.Builder builder,
             CustomConfiguration configuration) {
-        String smallIconUri = configuration.notificationCustomSmallIconUri(null);
-        if (TextUtils.isEmpty(smallIconUri)) {
-            smallIconUri = configuration.notificationSmallIconUri(null);
+        NotificationMetadata metadata = NotificationMetadata.from(configuration);
+        Bundle extras = builder.getExtras();
+        String customAppIconUri = configuration.notificationCustomSmallIconUri(null);
+        if (!TextUtils.isEmpty(customAppIconUri)
+                && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Bitmap customAppIcon = getBitmapFromUri(context, customAppIconUri, 200 * KiB);
+            if (customAppIcon != null) {
+                extras.putParcelable("miui.appIcon", Icon.createWithBitmap(customAppIcon));
+                extras.putString("custom_app_icon", "0");
+            }
         }
+
+        String smallIconUri = configuration.notificationSmallIconUri(null);
         if (!TextUtils.isEmpty(smallIconUri) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             Bitmap icon = getBitmapFromUri(context, smallIconUri, 200 * KiB);
             if (icon != null) {
@@ -223,41 +235,37 @@ public class NotificationController {
             try {
                 builder.setColor(Color.parseColor(smallIconColor));
             } catch (IllegalArgumentException ignored) {
+                try {
+                    builder.setColor(Integer.parseInt(smallIconColor));
+                } catch (NumberFormatException ignoredToo) {
+                }
             }
         }
 
-        int timeoutSeconds = configuration.notificationTimeoutSeconds(0);
-        if (timeoutSeconds > 0) {
-            builder.setTimeoutAfter(timeoutSeconds * 1000L);
+        if (metadata.timeoutSeconds != null && metadata.timeoutSeconds > 0) {
+            builder.setTimeoutAfter(metadata.timeoutSeconds * 1000L);
         }
 
-        String backgroundColor = configuration.notificationBackgroundColor(null);
-        if (!TextUtils.isEmpty(backgroundColor)) {
-            try {
-                builder.setColor(Color.parseColor(backgroundColor));
-                builder.setOngoing(true);
-                builder.setColorized(true);
-            } catch (IllegalArgumentException ignored) {
-            }
+        Integer backgroundColor = metadata.backgroundColor;
+        if (backgroundColor != null) {
+            builder.setColor(backgroundColor);
+            if (metadata.ongoing == null) builder.setOngoing(true);
+            if (metadata.colorized == null) builder.setColorized(true);
         }
+        if (metadata.ongoing != null) builder.setOngoing(metadata.ongoing);
+        if (metadata.colorized != null) builder.setColorized(metadata.colorized);
+        if (metadata.visibility != null) builder.setVisibility(metadata.visibility);
+        if (metadata.category != null) builder.setCategory(metadata.category);
 
-        Bundle extras = builder.getExtras();
         String imageDescription = configuration.imageDescription(null);
         if (!TextUtils.isEmpty(imageDescription)) {
             extras.putCharSequence("miui.imageDescribe", imageDescription);
         }
-        if (configuration.keys().contains("enable_keyguard")) {
-            extras.putBoolean("miui.enableKeyguard", configuration.enableKeyguard(true));
-        }
-        if (configuration.keys().contains("enable_float")) {
-            extras.putBoolean("miui.enableFloat", configuration.enableFloat(true));
-        }
-        if (configuration.keys().contains("notification_fold")) {
-            extras.putBoolean("miui.notificationFold", configuration.notificationFold(false));
-        }
-        int foldTimeoutSeconds = configuration.miuiFoldTimeoutSeconds(0);
-        if (foldTimeoutSeconds > 0) {
-            extras.putLong("miui.fold.timeout", foldTimeoutSeconds * 1000L);
+        if (metadata.enableKeyguard != null) extras.putBoolean("miui.enableKeyguard", metadata.enableKeyguard);
+        if (metadata.enableFloat != null) extras.putBoolean("miui.enableFloat", metadata.enableFloat);
+        if (metadata.fold != null) extras.putString("notification_fold", metadata.fold);
+        if (metadata.foldTimeoutSeconds != null && metadata.foldTimeoutSeconds > 0) {
+            extras.putLong("miui.fold.timeout", metadata.foldTimeoutSeconds * 1000L);
         }
 
         String styleType = configuration.notificationStyleType(null);
@@ -272,19 +280,23 @@ public class NotificationController {
         if (!TextUtils.isEmpty(colorfulBackground)) {
             extras.putString("miui.colorfulButtonBackgroundColor", colorfulBackground);
         }
-        String topRepeat = configuration.get("notification_top_repeat", null);
-        if (!TextUtils.isEmpty(topRepeat)) {
-            extras.putString("mipush_n_top_repeat", topRepeat);
-        }
-        String topPeriod = configuration.get("notification_top_period", null);
-        if (!TextUtils.isEmpty(topPeriod)) {
-            extras.putString("mipush_n_top_period", topPeriod);
-        }
-        String topFrequency = configuration.get("notification_top_frequency", null);
-        if (!TextUtils.isEmpty(topFrequency)) {
-            extras.putString("mipush_n_top_frequency", topFrequency);
+        if (Boolean.TRUE.equals(metadata.topRepeat)
+                && metadata.topPeriodSeconds != null
+                && metadata.topPeriodSeconds > 0
+                && metadata.topFrequency != null
+                && metadata.topFrequency >= 0
+                && metadata.topFrequency <= metadata.topPeriodSeconds) {
+            builder.setPriority(Notification.PRIORITY_MAX);
+            long originalWhen = builder.build().when;
+            extras.putLong("mipush_org_when", originalWhen);
+            extras.putBoolean("mipush_n_top_flag", true);
+            extras.putInt("mipush_n_top_prd", metadata.topPeriodSeconds);
+            if (metadata.topFrequency > 0) {
+                extras.putInt("mipush_n_top_fre", metadata.topFrequency);
+            }
         }
         extras.putString("mipush_target_package", packageName);
+        extras.putString("xmsf_target_package", packageName);
     }
 
     /**
@@ -313,8 +325,9 @@ public class NotificationController {
             // AOSP and non-MIUI builds do not expose this hidden API.
         }
         try {
-            CharSequence label = context.getPackageManager()
-                    .getApplicationLabel(context.getApplicationInfo());
+            PackageManager packageManager = context.getPackageManager();
+            CharSequence label = packageManager.getApplicationLabel(
+                    packageManager.getApplicationInfo(packageName, 0));
             notification.extras.putCharSequence("android.substName", label);
         } catch (Throwable ignored) {
         }
@@ -341,12 +354,10 @@ public class NotificationController {
             Context context,
             NotificationCompat.Builder notificationBuilder,
             CustomConfiguration configuration) {
-        if (!isFocusProtocolEnabled(context)) {
-            return;
-        }
         CustomConfiguration.FocusNotificationPayload payload =
                 configuration.focusNotificationPayload();
-        if (!payload.isUsable()) {
+        // Avoid a Settings provider round-trip for ordinary notifications.
+        if (!payload.isUsable() || !isFocusProtocolEnabled(context)) {
             return;
         }
 
@@ -385,7 +396,18 @@ public class NotificationController {
 
     @RequiresApi(Build.VERSION_CODES.M)
     private static final class FocusIconApi23 {
+        private static final int IMAGE_CACHE_MAX_BYTES = 4 * 1024 * 1024;
         private static final ExecutorService IMAGE_EXECUTOR = createImageExecutor();
+        private static final ConcurrentHashMap<String, CompletableFuture<Bitmap>> IN_FLIGHT =
+                new ConcurrentHashMap<>();
+        private static final LruCache<String, Bitmap> IMAGE_CACHE =
+                new LruCache<String, Bitmap>(IMAGE_CACHE_MAX_BYTES) {
+                    @Override
+                    protected int sizeOf(String key, Bitmap value) {
+                        if (value == null || value.isRecycled()) return 1;
+                        return Math.max(1, value.getAllocationByteCount());
+                    }
+                };
 
         private FocusIconApi23() {
         }
@@ -409,47 +431,73 @@ public class NotificationController {
                 Context context, Map<String, String> pictureUrls) {
             List<Map.Entry<String, String>> pictures =
                     new ArrayList<>(pictureUrls.entrySet());
-            List<Callable<Icon>> tasks = new ArrayList<>(pictures.size());
+            List<CompletableFuture<Bitmap>> futures = new ArrayList<>(pictures.size());
             for (Map.Entry<String, String> picture : pictures) {
-                tasks.add(() -> downloadPicture(context, picture.getValue()));
+                futures.add(getOrStartDownload(context, picture.getValue()));
             }
 
             Bundle result = new Bundle();
-            try {
-                List<Future<Icon>> futures = IMAGE_EXECUTOR.invokeAll(
-                        tasks, FOCUS_DOWNLOAD_CALLER_BUDGET_MILLIS, TimeUnit.MILLISECONDS);
-                for (int i = 0; i < pictures.size(); i++) {
-                    Icon icon = null;
-                    Future<Icon> future = futures.get(i);
-                    if (!future.isCancelled()) {
-                        try {
-                            icon = future.get();
-                        } catch (ExecutionException | CancellationException error) {
-                            logger.w("Unable to download focus-notification picture", error);
-                        }
+            long deadlineNanos = System.nanoTime()
+                    + TimeUnit.MILLISECONDS.toNanos(FOCUS_DOWNLOAD_CALLER_BUDGET_MILLIS);
+            for (int i = 0; i < pictures.size(); i++) {
+                Bitmap bitmap = null;
+                long remainingNanos = deadlineNanos - System.nanoTime();
+                if (remainingNanos > 0L) {
+                    try {
+                        bitmap = futures.get(i).get(remainingNanos, TimeUnit.NANOSECONDS);
+                    } catch (ExecutionException | TimeoutException error) {
+                        logger.w("Unable to download focus-notification picture", error);
+                    } catch (InterruptedException error) {
+                        Thread.currentThread().interrupt();
                     }
-                    // Official XMSF retains the key with a null value on failure.
-                    result.putParcelable(pictures.get(i).getKey(), icon);
                 }
-            } catch (InterruptedException error) {
-                Thread.currentThread().interrupt();
-                addNullPictures(result, pictures);
-            } catch (RuntimeException error) {
-                logger.w("Unable to schedule focus-notification pictures", error);
-                addNullPictures(result, pictures);
+                Icon icon = bitmap == null || bitmap.isRecycled()
+                        ? null : Icon.createWithBitmap(bitmap);
+                // Official XMSF retains the key with a null value on failure.
+                result.putParcelable(pictures.get(i).getKey(), icon);
             }
             return result;
         }
 
-        private static void addNullPictures(
-                Bundle result, List<Map.Entry<String, String>> pictures) {
-            for (Map.Entry<String, String> picture : pictures) {
-                result.putParcelable(picture.getKey(), null);
+        private static CompletableFuture<Bitmap> getOrStartDownload(
+                Context context, String url) {
+            if (url == null) {
+                return CompletableFuture.completedFuture(null);
             }
+            Bitmap cached = IMAGE_CACHE.get(url);
+            if (cached != null && !cached.isRecycled()) {
+                return CompletableFuture.completedFuture(cached);
+            }
+
+            CompletableFuture<Bitmap> created = new CompletableFuture<>();
+            CompletableFuture<Bitmap> existing = IN_FLIGHT.putIfAbsent(url, created);
+            if (existing != null) return existing;
+
+            try {
+                IMAGE_EXECUTOR.execute(() -> {
+                    try {
+                        Bitmap bitmap = downloadPicture(context, url);
+                        if (bitmap != null && !bitmap.isRecycled()
+                                && url.regionMatches(true, 0, "https://", 0, 8)) {
+                            IMAGE_CACHE.put(url, bitmap);
+                        }
+                        created.complete(bitmap);
+                    } catch (Throwable error) {
+                        logger.w("Unable to decode focus-notification picture", error);
+                        created.complete(null);
+                    } finally {
+                        IN_FLIGHT.remove(url, created);
+                    }
+                });
+            } catch (RejectedExecutionException error) {
+                IN_FLIGHT.remove(url, created);
+                created.complete(null);
+            }
+            return created;
         }
 
         @Nullable
-        private static Icon downloadPicture(Context context, String url) {
+        private static Bitmap downloadPicture(Context context, String url) {
             // Ask the bounded reader for one extra byte so exactly 100 KiB remains
             // valid while a larger response is rejected.
             MyNotificationIconHelper.GetIconResult result;
@@ -466,7 +514,7 @@ public class NotificationController {
                     .isPictureSizeAllowed(result.downloadSize)) {
                 return null;
             }
-            return Icon.createWithBitmap(result.bitmap);
+            return result.bitmap;
         }
     }
 

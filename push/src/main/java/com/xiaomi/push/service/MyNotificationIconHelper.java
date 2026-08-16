@@ -27,6 +27,8 @@ public class MyNotificationIconHelper {
     private static final int READ_UNIT = 1024;
     private static final int STANDARD_DENSITY = 160;
     private static final int STANDARD_ICON_SIZE = 48;
+    private static final int MAX_DECODED_DIMENSION = 2048;
+    private static final long MAX_DECODED_PIXELS = 1024L * 1024L;
 
     /* loaded from: classes.dex */
     public static class GetIconResult {
@@ -216,10 +218,42 @@ public class MyNotificationIconHelper {
             return 1;
         }
         int screenDensity = context.getResources().getDisplayMetrics().densityDpi;
-        int targetWidth = Math.round((screenDensity / 160.0f) * 48.0f);
-        if (opt.outWidth <= targetWidth || opt.outHeight <= targetWidth) {
+        int targetWidth = Math.max(1,
+                Math.round((screenDensity / (float) STANDARD_DENSITY) * STANDARD_ICON_SIZE));
+        return calculateSampleSize(opt.outWidth, opt.outHeight, targetWidth);
+    }
+
+    /**
+     * Preserve Xiaomi's 48dp target while bounding pathological panoramic or
+     * highly-compressed images before BitmapFactory allocates their pixels.
+     */
+    static int calculateSampleSize(int width, int height, int targetWidth) {
+        if (width <= 0 || height <= 0 || targetWidth <= 0) {
             return 1;
         }
-        return Math.min(opt.outWidth / targetWidth, opt.outHeight / targetWidth);
+        int sampleSize = 1;
+        if (width > targetWidth && height > targetWidth) {
+            int requested = Math.max(1,
+                    Math.min(width / targetWidth, height / targetWidth));
+            // BitmapFactory rounds non-power-of-two values down on supported
+            // Android releases, so model the effective value explicitly.
+            sampleSize = Integer.highestOneBit(requested);
+        }
+        while (decodedDimension(width, sampleSize) > MAX_DECODED_DIMENSION
+                || decodedDimension(height, sampleSize) > MAX_DECODED_DIMENSION
+                || decodedPixels(width, height, sampleSize) > MAX_DECODED_PIXELS) {
+            if (sampleSize > Integer.MAX_VALUE / 2) return Integer.MAX_VALUE;
+            sampleSize *= 2;
+        }
+        return sampleSize;
+    }
+
+    private static long decodedPixels(int width, int height, int sampleSize) {
+        return (long) decodedDimension(width, sampleSize)
+                * decodedDimension(height, sampleSize);
+    }
+
+    private static int decodedDimension(int value, int sampleSize) {
+        return (int) (((long) value + sampleSize - 1L) / sampleSize);
     }
 }

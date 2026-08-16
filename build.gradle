@@ -4,15 +4,20 @@ buildscript {
     ext.kotlin_version = '2.0.21'
 
     repositories {
+        // Prefer the canonical repositories on CI.  A transient 5xx from the
+        // Aliyun mirror is treated as a hard resolution failure by Gradle and
+        // prevents it from falling through to the repositories below.
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+        maven { url 'https://jitpack.io' }
+
+        // Keep the mirrors as a fallback for users on networks where the
+        // canonical endpoints are unavailable.
         maven { url = uri("https://maven.aliyun.com/repository/central") }
         maven { url = uri("https://maven.aliyun.com/repository/public") }
         maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
         maven { url = uri("https://maven.aliyun.com/repository/google") }
-
-        mavenCentral()
-        maven { url 'https://jitpack.io' }
-        gradlePluginPortal()
-        google()
     }
     dependencies {
         classpath 'com.android.tools.build:gradle:8.2.2'
@@ -26,15 +31,17 @@ buildscript {
 
 allprojects {
     repositories {
+        // See buildscript.repositories above.  The order is intentional:
+        // canonical sources first, mirrors only as a fallback.
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+        maven { url 'https://jitpack.io' }
+
         maven { url = uri("https://maven.aliyun.com/repository/central") }
         maven { url = uri("https://maven.aliyun.com/repository/public") }
         maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
         maven { url = uri("https://maven.aliyun.com/repository/google") }
-
-        mavenCentral()
-        maven { url 'https://jitpack.io' }
-        gradlePluginPortal()
-        google()
     }
 
     gradle.taskGraph.whenReady {

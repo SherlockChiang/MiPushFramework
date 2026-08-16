@@ -23,6 +23,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.PowerManager;
+import android.os.Process;
 import android.service.notification.StatusBarNotification;
 import android.text.TextUtils;
 import android.widget.Toast;
@@ -125,7 +126,13 @@ public class MyMIPushNotificationHelper {
                 java.util.concurrent.TimeUnit.SECONDS,
                 new java.util.concurrent.ArrayBlockingQueue<>(32),
                 r -> {
-                    Thread t = new Thread(r, "mipush-notification-" + NOTIFICATION_THREAD_COUNT.getAndIncrement());
+                    Thread t = new Thread(() -> {
+                        try {
+                            Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND);
+                        } catch (Throwable ignored) {
+                        }
+                        r.run();
+                    }, "mipush-notification-" + NOTIFICATION_THREAD_COUNT.getAndIncrement());
                     t.setDaemon(false);
                     return t;
                 },
@@ -197,7 +204,7 @@ public class MyMIPushNotificationHelper {
 
     private static void wakeScreen(Context context, String sourcePackage) {
         PowerManager powerManager = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
-        if (powerManager == null) {
+        if (powerManager == null || powerManager.isInteractive()) {
             return;
         }
         PowerManager.WakeLock fullWakeLock = powerManager.newWakeLock((
@@ -205,7 +212,10 @@ public class MyMIPushNotificationHelper {
                         PowerManager.FULL_WAKE_LOCK |
                         PowerManager.ACQUIRE_CAUSES_WAKEUP
         ), "xmsf: configurations of " + sourcePackage);
-        fullWakeLock.acquire(10000);
+        // Waking the panel is an explicit per-app configuration.  Keep the
+        // pulse short so a notification cannot hold a third-party ROM awake
+        // for ten seconds after SystemUI has already rendered it.
+        fullWakeLock.acquire(5_000L);
     }
 
     private static Notification findActiveNotification(String packageName, int notificationId) {
@@ -348,6 +358,10 @@ public class MyMIPushNotificationHelper {
             NotificationCompat.BigPictureStyle style = new NotificationCompat.BigPictureStyle();
             style.bigPicture(bigPic);
             style.setBigContentTitle(title);
+            String imageDescription = configuration.imageDescription(null);
+            if (!TextUtils.isEmpty(imageDescription)) {
+                style.setContentDescription(imageDescription);
+            }
             notificationBuilder.setStyle(style);
         } else if ("1".equals(styleType)
                 || description.length() > NOTIFICATION_BIG_STYLE_MIN_LEN) {

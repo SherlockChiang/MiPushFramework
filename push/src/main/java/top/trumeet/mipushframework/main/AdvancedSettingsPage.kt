@@ -122,8 +122,12 @@ fun ConfigurationsBlock() {
             true
         }
         SettingsItem(
-            title = "Alarm schedule policy",
-            summary = if (exactAllowed) "Exact alarm allowed (EXACT)" else "Exact alarm not granted, falling back to INEXACT. Tap to open system settings."
+            title = stringResource(R.string.settings_alarm_schedule_policy),
+            summary = if (exactAllowed) {
+                stringResource(R.string.settings_alarm_schedule_exact)
+            } else {
+                stringResource(R.string.settings_alarm_schedule_inexact)
+            }
         ) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 try {
@@ -147,6 +151,17 @@ fun ConfigurationsBlock() {
 @Composable
 private fun ExperimentalBlock() {
     val context = LocalContext.current
+    val focusProtocolVersion = remember {
+        try {
+            Settings.System.getInt(
+                context.contentResolver,
+                "notification_focus_protocol",
+                0,
+            )
+        } catch (_: Throwable) {
+            0
+        }
+    }
     var iceBoxGranted by remember {
         mutableStateOf(
             SettingUtils.isIceBoxInstalled()
@@ -161,6 +176,17 @@ private fun ExperimentalBlock() {
     }
 
     SettingsGroup(title = stringResource(R.string.settings_experimental)) {
+        SettingsItem(
+            title = stringResource(R.string.settings_focus_protocol_status),
+            summary = if (focusProtocolVersion > 0) {
+                stringResource(
+                    R.string.settings_focus_protocol_available,
+                    focusProtocolVersion,
+                )
+            } else {
+                stringResource(R.string.settings_focus_protocol_unavailable)
+            },
+        ) {}
         SettingsItem(
             title = stringResource(R.string.settings_mock_notification),
             summary = stringResource(R.string.settings_mock_notification_summary)

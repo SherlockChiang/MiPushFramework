@@ -7,11 +7,18 @@ import static org.mockito.Mockito.when;
 
 import android.content.Context;
 
+import com.elvishew.xlog.XLog;
 import com.xiaomi.xmsf.utils.ConfigCenter;
 
+import org.junit.Before;
 import org.junit.Test;
 
 public class PushServiceDispatcherConfigTest {
+
+    @Before
+    public void setUp() {
+        XLog.init();
+    }
 
     @Test
     public void dispatcherUsesConfigCenterForegroundServiceContract() {

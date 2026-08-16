@@ -78,6 +78,9 @@
     <string name="debug_test_content">这是一个测试内容</string>
     <string name="settings_mock_focus_notification">模拟焦点通知</string>
     <string name="settings_mock_focus_notification_summary">发送携带 MIUI 官方焦点参数的测试通知，用于兼容性检查。</string>
+    <string name="settings_focus_protocol_status">HyperOS 焦点协议</string>
+    <string name="settings_focus_protocol_available">SystemUI 已提供焦点协议 v%1$d，将转发焦点参数与图片 Bundle。</string>
+    <string name="settings_focus_protocol_unavailable">SystemUI 未声明焦点协议，测试通知将使用标准 Android 回退样式。</string>
     <string name="debug_test_focus_title">焦点通知测试</string>
     <string name="debug_test_focus_content">焦点参数生成时间：</string>
     <string name="settings_notify_on_register">应用注册时显示通知</string>
@@ -87,6 +90,9 @@
     <string name="settings_show_all_events">事件列表中展示所有事件</string>
     <string name="settings_start_foreground_service">推送服务保活</string>
     <string name="settings_start_foreground_service_summary">显示一个前台通知来保活推送服务，可以通过禁用相应通知渠道来隐藏该通知</string>
+    <string name="settings_alarm_schedule_policy">息屏闹钟策略</string>
+    <string name="settings_alarm_schedule_exact">可使用精确唤醒，优先保证消息及时到达。</string>
+    <string name="settings_alarm_schedule_inexact">正在使用省电的非精确回退；点按可检查精确闹钟权限。</string>
 
     <string name="settings_icebox_permission">开启冰箱(IceBox)自动解冻支持</string>
     <string name="settings_icebox_permission_summary">点击通知栏时自动解冻冻结的App。

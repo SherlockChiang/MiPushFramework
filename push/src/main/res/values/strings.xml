@@ -83,6 +83,9 @@
     <string name="debug_test_content">This is Content</string>
     <string name="settings_mock_focus_notification">Simulate focus notification</string>
     <string name="settings_mock_focus_notification_summary">Send a notification carrying the official MIUI focus payload for compatibility testing.</string>
+    <string name="settings_focus_protocol_status">HyperOS focus protocol</string>
+    <string name="settings_focus_protocol_available">SystemUI protocol v%1$d is available. Focus payloads and image bundles will be forwarded.</string>
+    <string name="settings_focus_protocol_unavailable">SystemUI did not advertise the focus protocol. Test notifications will use the standard Android fallback.</string>
     <string name="debug_test_focus_title">Focus notification test</string>
     <string name="debug_test_focus_content">Focus payload generated at </string>
     <string name="accessibility_desc">Used for the alternate foreground application detection mode, higher compatibility, but poor performance.</string>
@@ -93,6 +96,9 @@
     <string name="settings_show_all_events">Display all events</string>
     <string name="settings_start_foreground_service">Keep MiPush alive</string>
     <string name="settings_start_foreground_service_summary">show a foreground notification to keep alive, you can hide it by disable notification channel</string>
+    <string name="settings_alarm_schedule_policy">Idle alarm policy</string>
+    <string name="settings_alarm_schedule_exact">Exact wake-up is available for the most reliable delivery.</string>
+    <string name="settings_alarm_schedule_inexact">Using the power-saving inexact fallback. Tap to review exact-alarm access.</string>
 
 
 
