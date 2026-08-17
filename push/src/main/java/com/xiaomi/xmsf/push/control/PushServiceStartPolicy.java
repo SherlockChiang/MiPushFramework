@@ -26,9 +26,11 @@ public class PushServiceStartPolicy {
         if (isUserInitiated) {
             return Action.START_SERVICE;
         }
-        if (isPersistentForegroundEnabled && isPlatformAllowed) {
-            return Action.START_FOREGROUND;
+        if (!isPlatformAllowed) {
+            return Action.SKIP;
         }
-        return Action.SKIP;
+        return isPersistentForegroundEnabled
+                ? Action.START_FOREGROUND
+                : Action.START_SERVICE;
     }
 }

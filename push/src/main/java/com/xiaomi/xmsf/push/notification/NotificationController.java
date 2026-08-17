@@ -18,6 +18,7 @@ import android.graphics.drawable.Icon;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.service.notification.StatusBarNotification;
 import android.text.TextUtils;
@@ -79,6 +80,9 @@ public class NotificationController {
     private static final String FOCUS_PROTOCOL_SETTING = "notification_focus_protocol";
     private static final String FOCUS_PARAM = "miui.focus.param";
     private static final String FOCUS_PICTURES = "miui.focus.pics";
+    private static final long FOCUS_PROTOCOL_CACHE_TTL_MILLIS = 5 * 60 * 1000L;
+    private static final FocusProtocolSupportCache FOCUS_PROTOCOL_SUPPORT_CACHE =
+            new FocusProtocolSupportCache(FOCUS_PROTOCOL_CACHE_TTL_MILLIS);
     // The official client permits a much longer network timeout. Holding our
     // notification worker for that long can starve all push notifications, so the
     // native-icon enhancement gets a small global budget while the URL payload stays.
@@ -256,6 +260,23 @@ public class NotificationController {
         if (metadata.visibility != null) builder.setVisibility(metadata.visibility);
         if (metadata.category != null) builder.setCategory(metadata.category);
 
+        if (configuration.notificationStyle()
+                == CustomConfiguration.NotificationStyle.COLORFUL) {
+            String colorfulStyleBackground =
+                    configuration.notificationColorfulBackgroundColor(null);
+            if (!TextUtils.isEmpty(colorfulStyleBackground)) {
+                try {
+                    // Portable approximation for ROMs without MIUI's private layout.
+                    builder.setColor(Color.parseColor(colorfulStyleBackground));
+                } catch (IllegalArgumentException ignored) {
+                    try {
+                        builder.setColor(Integer.parseInt(colorfulStyleBackground));
+                    } catch (NumberFormatException ignoredToo) {
+                    }
+                }
+            }
+        }
+
         String imageDescription = configuration.imageDescription(null);
         if (!TextUtils.isEmpty(imageDescription)) {
             extras.putCharSequence("miui.imageDescribe", imageDescription);
@@ -381,16 +402,18 @@ public class NotificationController {
         if (!"com.xiaomi.xmsf".equals(context.getPackageName())) {
             return false;
         }
-        int protocolVersion;
-        try {
-            protocolVersion = Settings.System.getInt(context.getContentResolver(),
-                    FOCUS_PROTOCOL_SETTING, 0);
-        } catch (Throwable error) {
-            logger.w("Unable to read focus-notification protocol setting", error);
-            return false;
-        }
-        return CustomConfiguration.FocusNotificationPayload
-                .isSupportedProtocolVersion(protocolVersion);
+        return FOCUS_PROTOCOL_SUPPORT_CACHE.get(SystemClock.elapsedRealtime(), () -> {
+            int protocolVersion;
+            try {
+                protocolVersion = Settings.System.getInt(context.getContentResolver(),
+                        FOCUS_PROTOCOL_SETTING, 0);
+            } catch (Throwable error) {
+                logger.w("Unable to read focus-notification protocol setting", error);
+                return false;
+            }
+            return CustomConfiguration.FocusNotificationPayload
+                    .isSupportedProtocolVersion(protocolVersion);
+        });
     }
 
     @RequiresApi(Build.VERSION_CODES.M)

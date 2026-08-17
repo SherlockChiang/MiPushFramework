@@ -7,6 +7,7 @@ import android.text.TextUtils;
 
 import com.xiaomi.channel.commonutils.logger.MyLog;
 import com.xiaomi.push.service.PushConstants;
+import com.xiaomi.push.service.PushServiceConstants;
 import com.xiaomi.push.service.timers.Alarm;
 import com.xiaomi.xmsf.push.control.PushServiceDispatcher;
 
@@ -23,7 +24,8 @@ public class MiPushPingReceiver extends BroadcastReceiver {
         if (PushConstants.ACTION_PING_TIMER.equals(paramIntent.getAction())) {
             if (TextUtils.equals(paramContext.getPackageName(), paramIntent.getPackage())) {
                 MyLog.v("Ping XMChannelService on timer");
-                PushServiceDispatcher.dispatchStart(paramContext, false);
+                PushServiceDispatcher.dispatchStart(
+                        paramContext, PushServiceConstants.ACTION_TIMER, false);
             } else {
                 MyLog.w("cancel the old ping timer");
                 Alarm.stop();

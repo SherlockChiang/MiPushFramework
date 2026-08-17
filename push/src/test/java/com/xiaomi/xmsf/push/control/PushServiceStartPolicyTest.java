@@ -7,41 +7,57 @@ import org.junit.Test;
 public class PushServiceStartPolicyTest {
 
     @Test
-    public void masterDisabledReturnsSkip() {
-        PushServiceStartPolicy.Action action = PushServiceStartPolicy.evaluate(
+    public void masterDisabledAlwaysReturnsSkip() {
+        assertAction(PushServiceStartPolicy.Action.SKIP,
                 false, true, true, true, true);
-        assertEquals(PushServiceStartPolicy.Action.SKIP, action);
+        assertAction(PushServiceStartPolicy.Action.SKIP,
+                false, false, false, false, true);
     }
 
     @Test
-    public void serviceRunningReturnsStartService() {
-        PushServiceStartPolicy.Action action = PushServiceStartPolicy.evaluate(
+    public void serviceRunningWithMasterEnabledReturnsStartService() {
+        assertAction(PushServiceStartPolicy.Action.START_SERVICE,
                 true, true, false, false, false);
-        assertEquals(PushServiceStartPolicy.Action.START_SERVICE, action);
+        assertAction(PushServiceStartPolicy.Action.START_SERVICE,
+                true, true, false, true, true);
     }
 
     @Test
-    public void userInitiatedAndServiceDeadReturnsStartService() {
-        PushServiceStartPolicy.Action action = PushServiceStartPolicy.evaluate(
+    public void userInitiatedWithMasterEnabledReturnsStartService() {
+        assertAction(PushServiceStartPolicy.Action.START_SERVICE,
                 true, false, true, false, false);
-        assertEquals(PushServiceStartPolicy.Action.START_SERVICE, action);
+        assertAction(PushServiceStartPolicy.Action.START_SERVICE,
+                true, false, true, true, true);
     }
 
     @Test
-    public void backgroundWithPersistentForegroundAndPlatformAllowedReturnsStartForeground() {
-        PushServiceStartPolicy.Action action = PushServiceStartPolicy.evaluate(
+    public void backgroundStartUsesConfiguredModeWhenPlatformAllowed() {
+        assertAction(PushServiceStartPolicy.Action.START_FOREGROUND,
                 true, false, false, true, true);
-        assertEquals(PushServiceStartPolicy.Action.START_FOREGROUND, action);
+        assertAction(PushServiceStartPolicy.Action.START_SERVICE,
+                true, false, false, false, true);
     }
 
     @Test
-    public void backgroundNotAllowedReturnsSkip() {
-        PushServiceStartPolicy.Action action = PushServiceStartPolicy.evaluate(
+    public void backgroundStartReturnsSkipWhenPlatformNotAllowed() {
+        assertAction(PushServiceStartPolicy.Action.SKIP,
                 true, false, false, true, false);
-        assertEquals(PushServiceStartPolicy.Action.SKIP, action);
+        assertAction(PushServiceStartPolicy.Action.SKIP,
+                true, false, false, false, false);
+    }
 
-        PushServiceStartPolicy.Action actionNoForeground = PushServiceStartPolicy.evaluate(
-                true, false, false, false, true);
-        assertEquals(PushServiceStartPolicy.Action.SKIP, actionNoForeground);
+    private static void assertAction(
+            PushServiceStartPolicy.Action expected,
+            boolean isMasterEnabled,
+            boolean isServiceRunning,
+            boolean isUserInitiated,
+            boolean isPersistentForegroundEnabled,
+            boolean isPlatformAllowed) {
+        assertEquals(expected, PushServiceStartPolicy.evaluate(
+                isMasterEnabled,
+                isServiceRunning,
+                isUserInitiated,
+                isPersistentForegroundEnabled,
+                isPlatformAllowed));
     }
 }

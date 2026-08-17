@@ -26,6 +26,17 @@ public class PushServiceDispatcher {
     }
 
     /**
+     * Dispatch a recovery/start request while preserving the SDK's action
+     * contract (for example network-status and check-alive are not timers).
+     */
+    public static PushServiceStartPolicy.Action dispatchStart(
+            Context context, String action, boolean userInitiated) {
+        Intent sourceIntent = new Intent();
+        sourceIntent.setAction(action);
+        return dispatchIntent(context, sourceIntent, userInitiated);
+    }
+
+    /**
      * Start the transport while preserving the SDK action and all extras. This
      * is the single gate used by recovery receivers and the bridge service.
      */

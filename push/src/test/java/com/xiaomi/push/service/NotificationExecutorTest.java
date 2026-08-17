@@ -45,4 +45,22 @@ public class NotificationExecutorTest {
         assertTrue("Thread name must start with mipush-notification-",
                 thread.getName().startsWith("mipush-notification-"));
     }
+
+    @Test
+    public void styleActionsUseOfficialXiaomiKeys() {
+        assertEquals("notification_style_button_left_notify_effect",
+                MyMIPushNotificationHelper.styleActionKeys(1).notifyEffect);
+        assertEquals("notification_style_button_mid_notify_effect",
+                MyMIPushNotificationHelper.styleActionKeys(2).notifyEffect);
+        assertEquals("notification_style_button_right_notify_effect",
+                MyMIPushNotificationHelper.styleActionKeys(3).notifyEffect);
+
+        MyMIPushNotificationHelper.StyleActionKeys keys =
+                MyMIPushNotificationHelper.styleActionKeys(4);
+
+        assertEquals("notification_colorful_button_notify_effect", keys.notifyEffect);
+        assertEquals("notification_colorful_button_intent_uri", keys.intentUri);
+        assertEquals("notification_colorful_button_intent_class", keys.intentClass);
+        assertEquals("notification_colorful_button_web_uri", keys.webUri);
+    }
 }

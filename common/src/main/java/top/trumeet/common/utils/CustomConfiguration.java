@@ -51,6 +51,9 @@ public class CustomConfiguration {
     private static final String NOTIFICATION_BANNER_ICON_URI = "notification_banner_icon_uri";
     private static final String NOTIFICATION_COLORFUL_BUTTON_TEXT = "notification_colorful_button_text";
     private static final String NOTIFICATION_COLORFUL_BUTTON_BG_COLOR = "notification_colorful_button_bg_color";
+    private static final String NOTIFICATION_COLORFUL_BG_COLOR = "notification_colorful_bg_color";
+    private static final String NOTIFICATION_COLORFUL_BG_IMAGE_URI = "notification_colorful_bg_image_uri";
+    // Kept only for payloads produced by older MiPush Framework versions.
     private static final String NOTIFICATION_COLORFUL_BUTTON_BG_IMAGE_URI = "notification_colorful_button_bg_image_uri";
     private static final String NOTIFICATION_CUSTOM_SMALL_ICON_URI = "notification_custom_small_icon_uri";
     private static final String NOTIFICATION_SMALL_ICON_URI = "notification_small_icon_uri";
@@ -187,6 +190,10 @@ public class CustomConfiguration {
         return get(NOTIFICATION_STYLE_TYPE, defaultValue);
     }
 
+    public NotificationStyle notificationStyle() {
+        return NotificationStyle.fromProtocolValue(notificationStyleType(null));
+    }
+
     public String notificationBannerImageUri(String defaultValue) {
         return get(NOTIFICATION_BANNER_IMAGE_URI, defaultValue);
     }
@@ -203,8 +210,39 @@ public class CustomConfiguration {
         return get(NOTIFICATION_COLORFUL_BUTTON_BG_COLOR, defaultValue);
     }
 
+    public String notificationColorfulBackgroundColor(String defaultValue) {
+        return get(NOTIFICATION_COLORFUL_BG_COLOR, defaultValue);
+    }
+
+    /**
+     * Xiaomi's published key wins whenever it is present. The button-background
+     * image spelling was previously used by this project for the whole colorful
+     * background and remains an absent-key fallback for compatible old payloads.
+     */
+    public String notificationColorfulBackgroundImageUri(String defaultValue) {
+        return get(NOTIFICATION_COLORFUL_BG_IMAGE_URI,
+                get(NOTIFICATION_COLORFUL_BUTTON_BG_IMAGE_URI, defaultValue));
+    }
+
     public String notificationColorfulButtonBackgroundImageUri(String defaultValue) {
         return get(NOTIFICATION_COLORFUL_BUTTON_BG_IMAGE_URI, defaultValue);
+    }
+
+    public enum NotificationStyle {
+        DEFAULT,
+        BIG_TEXT,
+        BIG_PICTURE,
+        COLORFUL,
+        BANNER;
+
+        public static NotificationStyle fromProtocolValue(@Nullable String value) {
+            if ("1".equals(value)) return BIG_TEXT;
+            if ("2".equals(value)) return BIG_PICTURE;
+            // Official XMSF mapping: 3 is Colorful and 4 is Banner.
+            if ("3".equals(value)) return COLORFUL;
+            if ("4".equals(value)) return BANNER;
+            return DEFAULT;
+        }
     }
 
     public String notificationCustomSmallIconUri(String defaultValue) {
@@ -260,7 +298,8 @@ public class CustomConfiguration {
 
     /**
      * Parse the documented, public part of Xiaomi's focus-notification payload.
-     * Invalid or over-limit data is left out instead of being forwarded to SystemUI.
+     * Picture values are forwarded exactly like official XMSF. Only this
+     * process' optional native-Icon downloads apply URI safety filtering.
      */
     public FocusNotificationPayload focusNotificationPayload() {
         String parameter = focusParam(null);
@@ -271,9 +310,7 @@ public class CustomConfiguration {
         List<Map.Entry<String, String>> pictureEntries = new ArrayList<>();
         for (Map.Entry<String, String> entry : mExtra.entrySet()) {
             String key = entry.getKey();
-            String value = entry.getValue();
-            if (key != null && key.startsWith(FOCUS_PICTURE_PREFIX)
-                    && isSupportedPictureValue(value)) {
+            if (key != null && key.startsWith(FOCUS_PICTURE_PREFIX)) {
                 pictureEntries.add(entry);
             }
         }
@@ -413,15 +450,14 @@ public class CustomConfiguration {
 
         /** URLs selected for native Icon downloads; the URL payload remains complete. */
         public Map<String, String> downloadPictureUrls() {
-            if (pictureUrls.size() <= FOCUS_PICTURE_MAX_COUNT) {
-                return pictureUrls;
-            }
             Map<String, String> result = new LinkedHashMap<>();
             for (Map.Entry<String, String> entry : pictureUrls.entrySet()) {
                 if (result.size() >= FOCUS_PICTURE_MAX_COUNT) {
                     break;
                 }
-                result.put(entry.getKey(), entry.getValue());
+                if (isSupportedPictureValue(entry.getValue())) {
+                    result.put(entry.getKey(), entry.getValue());
+                }
             }
             return Collections.unmodifiableMap(result);
         }

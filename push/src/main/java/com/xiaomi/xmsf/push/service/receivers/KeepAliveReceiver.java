@@ -8,6 +8,7 @@ import android.os.SystemClock;
 import com.elvishew.xlog.Logger;
 import com.elvishew.xlog.XLog;
 import com.xiaomi.channel.commonutils.logger.MyLog;
+import com.xiaomi.push.service.PushServiceConstants;
 import com.xiaomi.xmsf.push.control.PushControllerUtils;
 import com.xiaomi.xmsf.push.control.PushServiceDispatcher;
 
@@ -34,7 +35,8 @@ public class KeepAliveReceiver extends BroadcastReceiver {
         }
         // A live transport does not need a second start command on every screen
         // wake. Avoid needless binder/service churn on HyperOS and third-party ROMs.
-        if (PushControllerUtils.isPushServiceRunning()) {
+        if (!shouldAttemptRecoveryForServiceState(
+                PushControllerUtils.isPushServiceRunning())) {
             return;
         }
         try {
@@ -46,7 +48,8 @@ public class KeepAliveReceiver extends BroadcastReceiver {
 
             lastActiveElapsedRealtime = nowElapsedRealtime;
             logger.d("start service when " + intent.getAction());
-            PushServiceDispatcher.dispatchStart(context, false);
+            PushServiceDispatcher.dispatchStart(
+                    context, PushServiceConstants.ACTION_CHECK_ALIVE, false);
         } catch (Exception localException) {
             MyLog.e(localException);
         }
@@ -57,7 +60,7 @@ public class KeepAliveReceiver extends BroadcastReceiver {
                 || nowElapsedRealtime - lastElapsedRealtime >= MIN_START_INTERVAL_MS;
     }
 
-    static boolean shouldUseForegroundStart(boolean serviceRunning) {
+    static boolean shouldAttemptRecoveryForServiceState(boolean serviceRunning) {
         return !serviceRunning;
     }
 }

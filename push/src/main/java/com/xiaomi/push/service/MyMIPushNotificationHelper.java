@@ -3,6 +3,7 @@ package com.xiaomi.push.service;
 import static com.xiaomi.push.service.MIPushNotificationHelper.FROM_NOTIFICATION;
 import static com.xiaomi.push.service.MIPushNotificationHelper.getTargetPackage;
 import static com.xiaomi.push.service.MIPushNotificationHelper.isBusinessMessage;
+import static com.xiaomi.push.service.MyNotificationIconHelper.KiB;
 import static com.xiaomi.push.service.MyNotificationIconHelper.MiB;
 import static com.xiaomi.xmsf.push.notification.NotificationController.getBitmapFromUri;
 import static com.xiaomi.xmsf.push.notification.NotificationController.getLargeIcon;
@@ -88,9 +89,12 @@ public class MyMIPushNotificationHelper {
     private static final int NOTIFICATION_ACTION_BUTTON_PLACE_LEFT = 1;
     private static final int NOTIFICATION_ACTION_BUTTON_PLACE_MID = 2;
     private static final int NOTIFICATION_ACTION_BUTTON_PLACE_RIGHT = 3;
-    private static final String NOTIFICATION_STYLE_BIG_PICTURE = "2";
-    private static final String NOTIFICATION_STYLE_BIG_PICTURE_URI = "notification_bigPic_uri";
-    private static final String NOTIFICATION_STYLE_BIG_TEXT = "1";
+    private static final int NOTIFICATION_ACTION_BUTTON_PLACE_COLORFUL = 4;
+    private static final String NOTIFICATION_COLORFUL_BUTTON_INTENT_CLASS = "notification_colorful_button_intent_class";
+    private static final String NOTIFICATION_COLORFUL_BUTTON_INTENT_URI = "notification_colorful_button_intent_uri";
+    private static final String NOTIFICATION_COLORFUL_BUTTON_NOTIFY_EFFECT = "notification_colorful_button_notify_effect";
+    private static final String NOTIFICATION_COLORFUL_BUTTON_TEXT = "notification_colorful_button_text";
+    private static final String NOTIFICATION_COLORFUL_BUTTON_WEB_URI = "notification_colorful_button_web_uri";
     private static final String NOTIFICATION_STYLE_BUTTON_LEFT_INTENT_CLASS = "notification_style_button_left_intent_class";
     private static final String NOTIFICATION_STYLE_BUTTON_LEFT_INTENT_URI = "notification_style_button_left_intent_uri";
     private static final String NOTIFICATION_STYLE_BUTTON_LEFT_NAME = "notification_style_button_left_name";
@@ -107,6 +111,26 @@ public class MyMIPushNotificationHelper {
     private static final String NOTIFICATION_STYLE_BUTTON_RIGHT_NOTIFY_EFFECT = "notification_style_button_right_notify_effect";
     private static final String NOTIFICATION_STYLE_BUTTON_RIGHT_WEB_URI = "notification_style_button_right_web_uri";
     private static final String NOTIFICATION_STYLE_TYPE = "notification_style_type";
+    private static final StyleActionKeys LEFT_ACTION_KEYS = new StyleActionKeys(
+            NOTIFICATION_STYLE_BUTTON_LEFT_NOTIFY_EFFECT,
+            NOTIFICATION_STYLE_BUTTON_LEFT_INTENT_URI,
+            NOTIFICATION_STYLE_BUTTON_LEFT_INTENT_CLASS,
+            NOTIFICATION_STYLE_BUTTON_LEFT_WEB_URI);
+    private static final StyleActionKeys MID_ACTION_KEYS = new StyleActionKeys(
+            NOTIFICATION_STYLE_BUTTON_MID_NOTIFY_EFFECT,
+            NOTIFICATION_STYLE_BUTTON_MID_INTENT_URI,
+            NOTIFICATION_STYLE_BUTTON_MID_INTENT_CLASS,
+            NOTIFICATION_STYLE_BUTTON_MID_WEB_URI);
+    private static final StyleActionKeys RIGHT_ACTION_KEYS = new StyleActionKeys(
+            NOTIFICATION_STYLE_BUTTON_RIGHT_NOTIFY_EFFECT,
+            NOTIFICATION_STYLE_BUTTON_RIGHT_INTENT_URI,
+            NOTIFICATION_STYLE_BUTTON_RIGHT_INTENT_CLASS,
+            NOTIFICATION_STYLE_BUTTON_RIGHT_WEB_URI);
+    private static final StyleActionKeys COLORFUL_ACTION_KEYS = new StyleActionKeys(
+            NOTIFICATION_COLORFUL_BUTTON_NOTIFY_EFFECT,
+            NOTIFICATION_COLORFUL_BUTTON_INTENT_URI,
+            NOTIFICATION_COLORFUL_BUTTON_INTENT_CLASS,
+            NOTIFICATION_COLORFUL_BUTTON_WEB_URI);
 
     private static boolean tryLoadConfigurations = false;
 
@@ -342,18 +366,30 @@ public class MyMIPushNotificationHelper {
         String title = metaInfo.getTitle();
         String description = metaInfo.getDescription();
         CustomConfiguration configuration = XMPushUtils.getConfiguration(metaInfo);
-        String styleType = configuration.notificationStyleType(null);
+        CustomConfiguration.NotificationStyle notificationStyle =
+                configuration.notificationStyle();
 
         Bitmap bigPic = getBigPic(context, metaInfo);
-        if ("3".equals(styleType)) {
+        if (notificationStyle == CustomConfiguration.NotificationStyle.COLORFUL) {
+            bigPic = getBitmapFromUri(context,
+                    configuration.notificationColorfulBackgroundImageUri(null), 1 * MiB);
+        } else if (notificationStyle == CustomConfiguration.NotificationStyle.BANNER) {
             bigPic = getBitmapFromUri(context,
                     configuration.notificationBannerImageUri(null), 1 * MiB);
-        } else if ("4".equals(styleType)) {
-            bigPic = getBitmapFromUri(context,
-                    configuration.notificationColorfulButtonBackgroundImageUri(null), 1 * MiB);
         }
 
         NotificationCompat.Builder notificationBuilder = new NotificationCompat.Builder(context);
+        if (notificationStyle == CustomConfiguration.NotificationStyle.BANNER) {
+            Bitmap bannerIcon = getBitmapFromUri(context,
+                    configuration.notificationBannerIconUri(null), 200 * KiB);
+            if (bannerIcon != null) {
+                // MIUI renders this inside its private banner layout. A large
+                // icon is the closest portable representation on other ROMs.
+                notificationBuilder.setLargeIcon(bannerIcon);
+            }
+        }
+        // Colorful and Banner are private MIUI layouts. On other ROMs, their
+        // published background image is represented with the portable style.
         if (bigPic != null) {
             NotificationCompat.BigPictureStyle style = new NotificationCompat.BigPictureStyle();
             style.bigPicture(bigPic);
@@ -363,22 +399,12 @@ public class MyMIPushNotificationHelper {
                 style.setContentDescription(imageDescription);
             }
             notificationBuilder.setStyle(style);
-        } else if ("1".equals(styleType)
+        } else if (notificationStyle == CustomConfiguration.NotificationStyle.BIG_TEXT
                 || description.length() > NOTIFICATION_BIG_STYLE_MIN_LEN) {
             NotificationCompat.BigTextStyle style = new NotificationCompat.BigTextStyle();
             style.bigText(description);
             style.setBigContentTitle(title);
             notificationBuilder.setStyle(style);
-        }
-
-        if ("4".equals(styleType)) {
-            String background = configuration.notificationColorfulButtonBackgroundColor(null);
-            if (background != null) {
-                try {
-                    notificationBuilder.setColor(Color.parseColor(background));
-                } catch (IllegalArgumentException ignored) {
-                }
-            }
         }
 
         String[] titleAndDesp = determineTitleAndDespByDIP(context, metaInfo);
@@ -830,6 +856,16 @@ public class MyMIPushNotificationHelper {
         if (stylePendingIntent3 != null && !TextUtils.isEmpty(metaExtra.get(NOTIFICATION_STYLE_BUTTON_RIGHT_NAME))) {
             builder.addAction(0, metaExtra.get(NOTIFICATION_STYLE_BUTTON_RIGHT_NAME), stylePendingIntent3);
         }
+        if ("3".equals(metaExtra.get(NOTIFICATION_STYLE_TYPE))) {
+            PendingIntent colorfulPendingIntent = getStylePendingIntent(
+                    context, pkgName, NOTIFICATION_ACTION_BUTTON_PLACE_COLORFUL, metaExtra);
+            String colorfulButtonText = metaExtra.get(NOTIFICATION_COLORFUL_BUTTON_TEXT);
+            if (colorfulPendingIntent != null && !TextUtils.isEmpty(colorfulButtonText)) {
+                // Preserve the official Colorful button as a standard action
+                // when MIUI's private RemoteViews implementation is unavailable.
+                builder.addAction(0, colorfulButtonText, colorfulPendingIntent);
+            }
+        }
         return builder;
     }
 
@@ -838,20 +874,13 @@ public class MyMIPushNotificationHelper {
         if (metaExtra == null || (intent = getPendingIntentFromExtra(context, pkgName, place, metaExtra)) == null) {
             return null;
         }
-        return PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_IMMUTABLE);
+        return PendingIntent.getActivity(context, place, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
     private static Intent getPendingIntentFromExtra(Context context, String pkgName, int place, Map<String, String> extra) {
-        String str;
-        String webUriKey;
-        String intentUriKey;
-        String intentClassKey;
-        if (place < NOTIFICATION_ACTION_BUTTON_PLACE_MID) {
-            str = NOTIFICATION_STYLE_BUTTON_LEFT_NOTIFY_EFFECT;
-        } else {
-            str = place < NOTIFICATION_ACTION_BUTTON_PLACE_RIGHT ? NOTIFICATION_STYLE_BUTTON_MID_NOTIFY_EFFECT : NOTIFICATION_STYLE_BUTTON_RIGHT_NOTIFY_EFFECT;
-        }
-        String typeId = extra.get(str);
+        StyleActionKeys keys = styleActionKeys(place);
+        String typeId = extra.get(keys.notifyEffect);
         if (TextUtils.isEmpty(typeId)) {
             return null;
         }
@@ -863,18 +892,8 @@ public class MyMIPushNotificationHelper {
                 logger.e("Cause: " + e.getMessage());
             }
         } else if (PushConstants.NOTIFICATION_CLICK_INTENT.equals(typeId)) {
-            if (place < NOTIFICATION_ACTION_BUTTON_PLACE_MID) {
-                intentUriKey = NOTIFICATION_STYLE_BUTTON_LEFT_INTENT_URI;
-            } else {
-                intentUriKey = place < NOTIFICATION_ACTION_BUTTON_PLACE_RIGHT ? NOTIFICATION_STYLE_BUTTON_MID_INTENT_URI : NOTIFICATION_STYLE_BUTTON_RIGHT_INTENT_URI;
-            }
-            if (place < NOTIFICATION_ACTION_BUTTON_PLACE_MID) {
-                intentClassKey = NOTIFICATION_STYLE_BUTTON_LEFT_INTENT_CLASS;
-            } else {
-                intentClassKey = place < NOTIFICATION_ACTION_BUTTON_PLACE_RIGHT ? NOTIFICATION_STYLE_BUTTON_MID_INTENT_CLASS : NOTIFICATION_STYLE_BUTTON_RIGHT_INTENT_CLASS;
-            }
-            if (extra.containsKey(intentUriKey)) {
-                String intentStr = extra.get(intentUriKey);
+            if (extra.containsKey(keys.intentUri)) {
+                String intentStr = extra.get(keys.intentUri);
                 if (intentStr != null) {
                     try {
                         intent = Intent.parseUri(intentStr, Intent.URI_INTENT_SCHEME);
@@ -883,18 +902,13 @@ public class MyMIPushNotificationHelper {
                         logger.e("Cause: " + e2.getMessage());
                     }
                 }
-            } else if (extra.containsKey(intentClassKey)) {
-                String className = extra.get(intentClassKey);
+            } else if (extra.containsKey(keys.intentClass)) {
+                String className = extra.get(keys.intentClass);
                 intent = new Intent();
                 intent.setComponent(new ComponentName(pkgName, className));
             }
         } else if (PushConstants.NOTIFICATION_CLICK_WEB_PAGE.equals(typeId)) {
-            if (place < NOTIFICATION_ACTION_BUTTON_PLACE_MID) {
-                webUriKey = NOTIFICATION_STYLE_BUTTON_LEFT_WEB_URI;
-            } else {
-                webUriKey = place < NOTIFICATION_ACTION_BUTTON_PLACE_RIGHT ? NOTIFICATION_STYLE_BUTTON_MID_WEB_URI : NOTIFICATION_STYLE_BUTTON_RIGHT_WEB_URI;
-            }
-            String uri = extra.get(webUriKey);
+            String uri = extra.get(keys.webUri);
             if (!TextUtils.isEmpty(uri)) {
                 String tmp = uri.trim();
                 if (!tmp.startsWith("http://") && !tmp.startsWith("https://")) {
@@ -924,6 +938,34 @@ public class MyMIPushNotificationHelper {
             }
         }
         return null;
+    }
+
+    static StyleActionKeys styleActionKeys(int place) {
+        if (place == NOTIFICATION_ACTION_BUTTON_PLACE_COLORFUL) {
+            return COLORFUL_ACTION_KEYS;
+        }
+        if (place < NOTIFICATION_ACTION_BUTTON_PLACE_MID) {
+            return LEFT_ACTION_KEYS;
+        }
+        if (place < NOTIFICATION_ACTION_BUTTON_PLACE_RIGHT) {
+            return MID_ACTION_KEYS;
+        }
+        return RIGHT_ACTION_KEYS;
+    }
+
+    static final class StyleActionKeys {
+        final String notifyEffect;
+        final String intentUri;
+        final String intentClass;
+        final String webUri;
+
+        StyleActionKeys(String notifyEffect, String intentUri,
+                        String intentClass, String webUri) {
+            this.notifyEffect = notifyEffect;
+            this.intentUri = intentUri;
+            this.intentClass = intentClass;
+            this.webUri = webUri;
+        }
     }
 
 

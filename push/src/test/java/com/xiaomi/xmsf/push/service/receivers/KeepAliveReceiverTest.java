@@ -24,8 +24,8 @@ public class KeepAliveReceiverTest {
     }
 
     @Test
-    public void runningServiceDoesNotRequireAnotherForegroundStart() {
-        assertFalse(KeepAliveReceiver.shouldUseForegroundStart(true));
-        assertTrue(KeepAliveReceiver.shouldUseForegroundStart(false));
+    public void runningServiceDoesNotRequireAnotherRecoveryStart() {
+        assertFalse(KeepAliveReceiver.shouldAttemptRecoveryForServiceState(true));
+        assertTrue(KeepAliveReceiver.shouldAttemptRecoveryForServiceState(false));
     }
 }

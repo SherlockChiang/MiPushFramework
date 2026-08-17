@@ -42,7 +42,7 @@ public class CustomConfigurationTest {
 
         assertTrue(payload.isUsable());
         assertEquals("{\"ticker\":\"parcel\"}", payload.parameter());
-        assertEquals(12,
+        assertEquals(14,
                 payload.pictureUrls().size());
         assertEquals("https://example.com/0.png",
                 payload.pictureUrls().get("miui.focus.pic_0"));
@@ -52,14 +52,16 @@ public class CustomConfigurationTest {
                         "miui.focus.pic_6", "miui.focus.pic_7", "miui.focus.pic_8",
                         "miui.focus.pic_9"),
                 new ArrayList<>(payload.downloadPictureUrls().keySet()));
-        assertFalse(payload.pictureUrls().containsKey("miui.focus.pic_http"));
-        assertFalse(payload.pictureUrls().containsKey("miui.focus.pic_malformed"));
+        assertTrue(payload.pictureUrls().containsKey("miui.focus.pic_http"));
+        assertTrue(payload.pictureUrls().containsKey("miui.focus.pic_malformed"));
+        assertFalse(payload.downloadPictureUrls().containsKey("miui.focus.pic_http"));
+        assertFalse(payload.downloadPictureUrls().containsKey("miui.focus.pic_malformed"));
         assertTrue(payload.pictureUrls().containsKey("miui.focus.pic_10"));
         assertTrue(payload.pictureUrls().containsKey("miui.focus.pic_11"));
     }
 
     @Test
-    public void focusPayloadRejectsUrlsWithUserInfoEmptyHostAndWhitespace() {
+    public void focusPayloadForwardsUnsafeUrlsButRejectsThemForNativeDownloads() {
         Map<String, String> extras = new LinkedHashMap<>();
         extras.put("miui.focus.param", "{\"ticker\":\"url-tests\"}");
         extras.put("miui.focus.pic_1", "https://user:pass@example.com/pic.png");
@@ -73,14 +75,20 @@ public class CustomConfigurationTest {
                 new CustomConfiguration(extras).focusNotificationPayload();
 
         assertTrue(payload.isUsable());
-        assertEquals(1, payload.pictureUrls().size());
+        assertEquals(6, payload.pictureUrls().size());
+        assertEquals(1, payload.downloadPictureUrls().size());
         assertTrue(payload.pictureUrls().containsKey("miui.focus.pic_6"));
         assertEquals("https://valid.example.com/image.png", payload.pictureUrls().get("miui.focus.pic_6"));
-        assertFalse(payload.pictureUrls().containsKey("miui.focus.pic_1"));
-        assertFalse(payload.pictureUrls().containsKey("miui.focus.pic_2"));
-        assertFalse(payload.pictureUrls().containsKey("miui.focus.pic_3"));
-        assertFalse(payload.pictureUrls().containsKey("miui.focus.pic_4"));
-        assertFalse(payload.pictureUrls().containsKey("miui.focus.pic_5"));
+        assertTrue(payload.pictureUrls().containsKey("miui.focus.pic_1"));
+        assertTrue(payload.pictureUrls().containsKey("miui.focus.pic_2"));
+        assertTrue(payload.pictureUrls().containsKey("miui.focus.pic_3"));
+        assertTrue(payload.pictureUrls().containsKey("miui.focus.pic_4"));
+        assertTrue(payload.pictureUrls().containsKey("miui.focus.pic_5"));
+        assertFalse(payload.downloadPictureUrls().containsKey("miui.focus.pic_1"));
+        assertFalse(payload.downloadPictureUrls().containsKey("miui.focus.pic_2"));
+        assertFalse(payload.downloadPictureUrls().containsKey("miui.focus.pic_3"));
+        assertFalse(payload.downloadPictureUrls().containsKey("miui.focus.pic_4"));
+        assertFalse(payload.downloadPictureUrls().containsKey("miui.focus.pic_5"));
     }
 
     @Test
@@ -223,6 +231,45 @@ public class CustomConfigurationTest {
         assertEquals("content://com.example/icon", custom.notificationSmallIconUri(null));
         assertFalse(custom.enableKeyguard(true));
         assertEquals(12, custom.miuiFoldTimeoutSeconds(0));
+    }
+
+    @Test
+    public void notificationStyleMappingMatchesOfficialXmsf() {
+        Map<String, String> extras = new HashMap<>();
+        CustomConfiguration custom = new CustomConfiguration(extras);
+
+        extras.put("notification_style_type", "3");
+        assertEquals(CustomConfiguration.NotificationStyle.COLORFUL,
+                custom.notificationStyle());
+
+        extras.put("notification_style_type", "4");
+        assertEquals(CustomConfiguration.NotificationStyle.BANNER,
+                custom.notificationStyle());
+
+        extras.put("notification_style_type", "unknown");
+        assertEquals(CustomConfiguration.NotificationStyle.DEFAULT,
+                custom.notificationStyle());
+    }
+
+    @Test
+    public void officialColorfulBackgroundKeysWinOverLegacyImageFallback() {
+        Map<String, String> extras = new HashMap<>();
+        extras.put("notification_colorful_button_bg_image_uri", "content://legacy/image");
+        extras.put("notification_colorful_button_bg_color", "#111111");
+        extras.put("notification_colorful_bg_color", "#222222");
+        CustomConfiguration custom = new CustomConfiguration(extras);
+
+        assertEquals("content://legacy/image",
+                custom.notificationColorfulBackgroundImageUri(null));
+        assertEquals("#222222", custom.notificationColorfulBackgroundColor(null));
+        assertEquals("#111111", custom.notificationColorfulButtonBackgroundColor(null));
+
+        extras.put("notification_colorful_bg_image_uri", "content://official/image");
+        assertEquals("content://official/image",
+                custom.notificationColorfulBackgroundImageUri(null));
+
+        extras.put("notification_colorful_bg_image_uri", "");
+        assertEquals("", custom.notificationColorfulBackgroundImageUri(null));
     }
 
     @Test
