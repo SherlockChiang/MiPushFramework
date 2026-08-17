@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -209,6 +210,7 @@ fun BottomNavigationBar(
     navController: NavController,
     modifier: Modifier = Modifier,
     floating: Boolean = true,
+    initialRoute: String? = null,
 ) {
     val items = listOf(
         Screen.Events, Screen.Apps, Screen.Settings
@@ -222,22 +224,28 @@ fun BottomNavigationBar(
             icon = screen.icon,
         )
     }
-    val selected = items.indexOfFirst { it.route.toString() == currentRoute }.coerceAtLeast(0)
+    val selectedRoute = currentRoute ?: initialRoute
+    val selected = items.indexOfFirst { it.route.toString() == selectedRoute }.coerceAtLeast(0)
 
-    MiuixBottomNavigation(
-        modifier = modifier,
-        items = navigationItems,
-        selected = selected,
-        onClick = { index ->
-            val screen = items[index]
-            navController.navigate(screen.route.toString()) {
-                popUpTo(navController.graph.startDestinationId) { saveState = true }
-                launchSingleTop = true
-                restoreState = true
-            }
-        },
-        floating = floating,
-    )
+    // Scaffold subcomposes the bottom bar before NavHost attaches its graph. Use the declared
+    // start route for that frame, then recreate the indicator once the first real/restored
+    // destination appears so cold start and state restoration never animate from a false tab.
+    key(currentRoute != null) {
+        MiuixBottomNavigation(
+            modifier = modifier,
+            items = navigationItems,
+            selected = selected,
+            onClick = { index ->
+                val screen = items[index]
+                navController.navigate(screen.route.toString()) {
+                    popUpTo(navController.graph.startDestinationId) { saveState = true }
+                    launchSingleTop = true
+                    restoreState = true
+                }
+            },
+            floating = floating,
+        )
+    }
 }
 
 @Composable
@@ -264,6 +272,7 @@ private fun Main(
                     BottomNavigationBar(
                         navController = navController,
                         floating = true,
+                        initialRoute = startDestination,
                     )
                 }
             } else {
@@ -271,6 +280,7 @@ private fun Main(
                     navController = navController,
                     modifier = Modifier.fillMaxWidth(),
                     floating = false,
+                    initialRoute = startDestination,
                 )
             }
         },
