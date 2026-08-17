@@ -264,9 +264,15 @@ public class CustomConfigurationTest {
         assertEquals("#222222", custom.notificationColorfulBackgroundColor(null));
         assertEquals("#111111", custom.notificationColorfulButtonBackgroundColor(null));
 
+        extras.remove("notification_colorful_bg_color");
+        assertNull(custom.notificationColorfulBackgroundColor(null));
+        extras.put("notification_colorful_bg_color", "#222222");
+
         extras.put("notification_colorful_bg_image_uri", "content://official/image");
         assertEquals("content://official/image",
                 custom.notificationColorfulBackgroundImageUri(null));
+        assertEquals("content://official/image",
+                custom.notificationColorfulButtonBackgroundImageUri(null));
 
         extras.put("notification_colorful_bg_image_uri", "");
         assertEquals("", custom.notificationColorfulBackgroundImageUri(null));

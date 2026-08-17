@@ -225,7 +225,7 @@ public class CustomConfiguration {
     }
 
     public String notificationColorfulButtonBackgroundImageUri(String defaultValue) {
-        return get(NOTIFICATION_COLORFUL_BUTTON_BG_IMAGE_URI, defaultValue);
+        return notificationColorfulBackgroundImageUri(defaultValue);
     }
 
     public enum NotificationStyle {
