@@ -7,11 +7,11 @@ import org.junit.Test;
 
 public class StartupWorkPolicyTest {
     @Test
-    public void qaAndDisabledInstallsNeverRunAutomaticStartupWork() {
-        assertFalse(StartupWorkPolicy.shouldRunAppStartup(true, true, true));
-        assertFalse(StartupWorkPolicy.shouldRunAppStartup(false, true, false));
-        assertFalse(StartupWorkPolicy.shouldRunAppStartup(false, false, true));
-        assertTrue(StartupWorkPolicy.shouldRunAppStartup(false, true, true));
+    public void disabledOrNonMainProcessesNeverRunAutomaticStartupWork() {
+        assertFalse(StartupWorkPolicy.shouldRunAppStartup(true, false));
+        assertFalse(StartupWorkPolicy.shouldRunAppStartup(false, true));
+        assertFalse(StartupWorkPolicy.shouldRunAppStartup(false, false));
+        assertTrue(StartupWorkPolicy.shouldRunAppStartup(true, true));
     }
 
     @Test

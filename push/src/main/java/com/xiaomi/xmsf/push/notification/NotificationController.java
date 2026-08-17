@@ -38,7 +38,6 @@ import com.nihility.notification.NotificationManagerEx;
 import com.xiaomi.push.service.MyNotificationIconHelper;
 import com.xiaomi.xmpush.thrift.PushMetaInfo;
 import com.xiaomi.xmpush.thrift.XmPushActionContainer;
-import com.xiaomi.xmsf.BuildConfig;
 import com.xiaomi.xmsf.R;
 import com.xiaomi.xmsf.push.utils.Configurations;
 import com.xiaomi.xmsf.push.utils.IconConfigurations;
@@ -379,7 +378,7 @@ public class NotificationController {
         if (context == null) {
             return false;
         }
-        if (!BuildConfig.QA_BUILD && !"com.xiaomi.xmsf".equals(context.getPackageName())) {
+        if (!"com.xiaomi.xmsf".equals(context.getPackageName())) {
             return false;
         }
         int protocolVersion;

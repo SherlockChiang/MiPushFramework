@@ -25,39 +25,24 @@ public class ManifestComponentContractTest {
             "com.xiaomi.mipush.sdk.PushMessageHandler";
 
     @Test
-    public void sourceManifestsDeclareProductionAndQaBoundaries() throws Exception {
+    public void sourceManifestDeclaresProductionComponents() throws Exception {
         Path pushDirectory = findPushDirectory();
         Document main = parse(pushDirectory.resolve("src/main/AndroidManifest.xml"));
-        Document qa = parse(pushDirectory.resolve("src/qa/AndroidManifest.xml"));
 
         assertAttribute(main, "service", PUSH_SERVICE, "exported", "true");
         assertAttribute(main, "receiver", PUSH_RECEIVER, "exported", "true");
         assertAttribute(main, "service", PUSH_MESSAGE_HANDLER, "enabled", "true");
         assertAttribute(main, "service", PUSH_MESSAGE_HANDLER, "exported", "true");
-
-        assertAttribute(qa, "receiver", PUSH_RECEIVER, "enabled", "false");
-        assertAttribute(qa, "receiver", PUSH_RECEIVER, "exported", "false");
-        assertAttribute(qa, "service", PUSH_SERVICE, "exported", "false");
-        assertAttribute(qa, "service", PUSH_MESSAGE_HANDLER, "enabled", "false");
-        assertAttribute(qa, "service", PUSH_MESSAGE_HANDLER, "exported", "false");
     }
 
     @Test
     public void mergedManifestPreservesCurrentVariantContract() throws Exception {
         Document merged = parse(findMergedManifest());
 
-        if (BuildConfig.QA_BUILD) {
-            assertAttribute(merged, "receiver", PUSH_RECEIVER, "enabled", "false");
-            assertAttribute(merged, "receiver", PUSH_RECEIVER, "exported", "false");
-            assertAttribute(merged, "service", PUSH_SERVICE, "exported", "false");
-            assertAttribute(merged, "service", PUSH_MESSAGE_HANDLER, "enabled", "false");
-            assertAttribute(merged, "service", PUSH_MESSAGE_HANDLER, "exported", "false");
-        } else {
-            assertAttribute(merged, "service", PUSH_SERVICE, "exported", "true");
-            assertAttribute(merged, "receiver", PUSH_RECEIVER, "exported", "true");
-            assertAttribute(merged, "service", PUSH_MESSAGE_HANDLER, "enabled", "true");
-            assertAttribute(merged, "service", PUSH_MESSAGE_HANDLER, "exported", "true");
-        }
+        assertAttribute(merged, "service", PUSH_SERVICE, "exported", "true");
+        assertAttribute(merged, "receiver", PUSH_RECEIVER, "exported", "true");
+        assertAttribute(merged, "service", PUSH_MESSAGE_HANDLER, "enabled", "true");
+        assertAttribute(merged, "service", PUSH_MESSAGE_HANDLER, "exported", "true");
     }
 
     private static Path findPushDirectory() {

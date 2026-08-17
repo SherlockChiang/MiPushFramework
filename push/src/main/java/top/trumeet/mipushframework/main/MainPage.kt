@@ -256,12 +256,13 @@ private fun Main(
                     modifier = Modifier
                         .fillMaxWidth()
                         .navigationBarsPadding()
-                        .padding(horizontal = 18.dp, vertical = 10.dp),
-                    contentAlignment = Alignment.Center,
+                        // Miuix's floating navigation pattern keeps a small breathing room above
+                        // the gesture bar; the bar itself owns its intrinsic width.
+                        .padding(bottom = 12.dp),
+                    contentAlignment = Alignment.BottomCenter,
                 ) {
                     BottomNavigationBar(
                         navController = navController,
-                        modifier = Modifier.fillMaxWidth(),
                         floating = true,
                     )
                 }

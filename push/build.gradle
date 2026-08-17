@@ -27,7 +27,6 @@ android {
         }
 
         buildConfigField "String", "GIT_TAG", "\"" + rootProject.ext.gitTag + "\""
-        buildConfigField "boolean", "QA_BUILD", "false"
         manifestPlaceholders = [
                 mipushReceivePermission: "com.xiaomi.xmsf.permission.MIPUSH_RECEIVE"
         ]
@@ -39,9 +38,6 @@ android {
             v2SigningEnabled true
             enableV3Signing = true
             enableV4Signing = true
-        }
-        qa {
-            initWith(signingConfigs.debug)
         }
         nihility {
             v1SigningEnabled true
@@ -105,19 +101,6 @@ android {
             targetSdkVersion 34
             versionCode 1003003001
             signingConfig signingConfigs.nihility
-        }
-        qa {
-            dimension "version"
-            // Install beside a preloaded XMSF when its signing key is unavailable.
-            // This variant is intentionally limited to local UI/notification/perf QA.
-            applicationIdSuffix ".qa"
-            versionNameSuffix "-qa"
-            buildConfigField "boolean", "QA_BUILD", "true"
-            targetSdkVersion 34
-            manifestPlaceholders = [
-                    mipushReceivePermission: "com.xiaomi.xmsf.qa.permission.MIPUSH_RECEIVE"
-            ]
-            signingConfig signingConfigs.qa
         }
         vc105 {
             dimension "version"

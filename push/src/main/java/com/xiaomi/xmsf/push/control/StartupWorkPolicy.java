@@ -6,8 +6,8 @@ public final class StartupWorkPolicy {
     }
 
     public static boolean shouldRunAppStartup(
-            boolean qaBuild, boolean mainProcess, boolean masterEnabled) {
-        return !qaBuild && mainProcess && masterEnabled;
+            boolean mainProcess, boolean masterEnabled) {
+        return mainProcess && masterEnabled;
     }
 
     public static boolean shouldRunThrottled(

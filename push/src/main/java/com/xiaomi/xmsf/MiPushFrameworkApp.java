@@ -67,11 +67,9 @@ public class MiPushFrameworkApp extends Application {
 
         installCondom();
 
-        // QA is intentionally isolated from real client discovery and transport.
-        // Production background work also follows the master switch so opening a
-        // disabled installation does not wake scanners or post keep-alive prompts.
+        // Follow the master switch so opening a disabled installation does not wake
+        // scanners or post keep-alive prompts.
         if (StartupWorkPolicy.shouldRunAppStartup(
-                BuildConfig.QA_BUILD,
                 isAppMainProc(this),
                 PushControllerUtils.isPrefsEnable(this))) {
             awakePushActivateService(PushControllerUtils.wrapContext(this));
