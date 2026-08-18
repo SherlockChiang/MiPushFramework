@@ -229,6 +229,34 @@ public class CustomConfigurationTest {
     }
 
     @Test
+    public void useClickedActivityParsesStrictBooleanValue() {
+        Map<String, String> extras = new HashMap<>();
+        CustomConfiguration custom = new CustomConfiguration(extras);
+
+        // Production callers pass false as the default; an absent key must not
+        // opt every notification into an Activity PendingIntent.
+        assertFalse(custom.useClickedActivity(false));
+
+        extras.put("use_clicked_activity", "true");
+        assertTrue(custom.useClickedActivity(false));
+
+        extras.put("use_clicked_activity", "TRUE");
+        assertTrue(custom.useClickedActivity(false));
+
+        extras.put("use_clicked_activity", "false");
+        assertFalse(custom.useClickedActivity(false));
+
+        extras.put("use_clicked_activity", "");
+        assertFalse(custom.useClickedActivity(false));
+
+        extras.put("use_clicked_activity", "garbage");
+        assertFalse(custom.useClickedActivity(false));
+
+        extras.put("use_clicked_activity", null);
+        assertFalse(custom.useClickedActivity(false));
+    }
+
+    @Test
     public void officialHyperOsNotificationMetadataUsesPublishedKeys() {
         Map<String, String> extras = new HashMap<>();
         extras.put("notification_style_type", "4");

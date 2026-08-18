@@ -21,6 +21,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -37,6 +38,10 @@ public class ConfigurationsLoader {
 
     private String version;
     private Map<String, List<Object>> packageConfigs = new HashMap<>();
+    private final Map<String, List<ConfigurationReferenceDiagnostics.UnresolvedReference>> referenceSites =
+            new HashMap<>();
+    private List<ConfigurationReferenceDiagnostics.UnresolvedReference> unresolvedReferences =
+            Collections.emptyList();
 
     private Context mContext = null;
     private Uri mTreeUri = null;
@@ -51,9 +56,20 @@ public class ConfigurationsLoader {
         return packageConfigs;
     }
 
+    /**
+     * Returns a deterministic snapshot of configuration references that do not resolve to a
+     * currently loaded config key. Diagnostics contain config metadata only; notification data is
+     * never inspected or retained.
+     */
+    public List<ConfigurationReferenceDiagnostics.UnresolvedReference> getUnresolvedReferences() {
+        return unresolvedReferences;
+    }
+
     public boolean init(Context context, Uri treeUri) {
         mLastLoadTime = System.currentTimeMillis();
         packageConfigs.clear();
+        referenceSites.clear();
+        unresolvedReferences = Collections.emptyList();
         do {
             if (context == null || treeUri == null) {
                 break;
@@ -78,6 +94,7 @@ public class ConfigurationsLoader {
                 }
                 break;
             }
+            refreshUnresolvedReferences();
             return true;
         } while (false);
         return false;
@@ -135,7 +152,7 @@ public class ConfigurationsLoader {
             }
             String json = readTextFromUri(context, file.getUri());
             try {
-                parse(json);
+                parse(json, file.getName());
                 loadedFiles.add(file);
             } catch (JSONException e) {
                 exceptions.add(new Pair<>(file, e));
@@ -145,10 +162,16 @@ public class ConfigurationsLoader {
     }
 
     public void load(String json) throws JSONException {
-        parse(json);
+        load("<memory>", json);
     }
 
-    private void parse(String json) throws JSONException {
+    /** Loads an in-memory configuration while retaining a caller-provided diagnostic source name. */
+    public void load(String sourceName, String json) throws JSONException {
+        parse(json, sourceName);
+        refreshUnresolvedReferences();
+    }
+
+    private void parse(String json, String sourceName) throws JSONException {
         JSONObject jsonObject = new JSONObject(json);
         version = jsonObject.getString("version");
         JSONObject packageConfigsObj = jsonObject.getJSONObject("configs");
@@ -157,6 +180,36 @@ public class ConfigurationsLoader {
             String packageName = packageNames.next();
             JSONArray configsObj = packageConfigsObj.getJSONArray(packageName);
             packageConfigs.put(packageName, parseConfigs(configsObj));
+            referenceSites.put(packageName, findReferenceSites(sourceName, packageName, configsObj));
+        }
+    }
+
+    @NonNull
+    private static List<ConfigurationReferenceDiagnostics.UnresolvedReference> findReferenceSites(
+            String sourceName, String ownerKey, JSONArray configsObj) throws JSONException {
+        List<ConfigurationReferenceDiagnostics.UnresolvedReference> sites = new ArrayList<>();
+        for (int i = 0; i < configsObj.length(); ++i) {
+            Object config = configsObj.get(i);
+            if (config instanceof String) {
+                sites.add(ConfigurationReferenceDiagnostics.referenceSite(
+                        sourceName, ownerKey, (String) config));
+            }
+        }
+        return sites;
+    }
+
+    private void refreshUnresolvedReferences() {
+        List<ConfigurationReferenceDiagnostics.UnresolvedReference> sites = new ArrayList<>();
+        for (List<ConfigurationReferenceDiagnostics.UnresolvedReference> ownerSites
+                : referenceSites.values()) {
+            sites.addAll(ownerSites);
+        }
+        unresolvedReferences = ConfigurationReferenceDiagnostics.resolve(
+                packageConfigs.keySet(), sites);
+        for (ConfigurationReferenceDiagnostics.UnresolvedReference diagnostic
+                : unresolvedReferences) {
+            logger.w("unresolved_configuration_reference source=[%s] owner=[%s] reference=[%s]",
+                    diagnostic.getSourceName(), diagnostic.getOwnerKey(), diagnostic.getReference());
         }
     }
 

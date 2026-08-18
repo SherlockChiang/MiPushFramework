@@ -44,6 +44,11 @@ public class Configurations {
             loader.load(json);
     }
 
+    /** Returns unresolved config references without inspecting notification payloads. */
+    public List<ConfigurationReferenceDiagnostics.UnresolvedReference> getUnresolvedReferences() {
+        return loader.getUnresolvedReferences();
+    }
+
     public Set<String> handle(String packageName, XmPushActionContainer data)
             throws JSONException, NoSuchFieldException, IllegalAccessException, InvocationTargetException, NoSuchMethodException {
         String[] checkPkgs = new String[]{"^", packageName, "$"};

@@ -171,7 +171,7 @@ public class CustomConfiguration {
     }
 
     public boolean useClickedActivity(boolean defaultValue) {
-        return get(USE_CLICKED_ACTIVITY, defaultValue);
+        return getBooleanValue(USE_CLICKED_ACTIVITY, defaultValue);
     }
 
     public String notificationGroup(String defaultValue) {
