@@ -129,6 +129,19 @@ public class CustomConfigurationTest {
     }
 
     @Test
+    public void blankFocusParameterNeedsAtLeastOnePicture() {
+        Map<String, String> extras = new HashMap<>();
+        extras.put("miui.focus.param", "   ");
+
+        assertFalse(new CustomConfiguration(extras)
+                .focusNotificationPayload().isUsable());
+
+        extras.put("miui.focus.pic_0", "https://example.com/focus.png");
+        assertTrue(new CustomConfiguration(extras)
+                .focusNotificationPayload().isUsable());
+    }
+
+    @Test
     public void focusPayloadRejectsParameterOverUtf8ByteLimit() {
         StringBuilder oversized = new StringBuilder();
         while (oversized.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length

@@ -259,6 +259,9 @@ Registration is determined and initiated by the application and generally begins
 Registration is determined and initiated by the application and generally begins automatically when the application is launched. Some apps are only registered when finding a XiaoMi devices, you can try <b><a href="https://github.com/Magisk-Modules-Repo/MiPushFake">Magisk global-level module</a></b> or <b><a href="https://github.com/TimothyZhang023/Riru-MiPushFake">Magisk apps-level module</a></b> to increase success. See also: <b><a href="https://github.com/MiPushFramework/MiPushFramework/wiki/%E5%BA%94%E7%94%A8%E7%A8%8B%E5%BC%8F%E6%B3%A8%E5%86%8C%E9%97%AE%E9%A2%98%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88">应用程式注册问题解决方案</a></b> and <b><a href="https://github.com/MiPushFramework/MiPushFramework/wiki/%5B%E5%B8%AE%E5%8A%A9%5D-%E5%BA%94%E7%94%A8%E6%B3%A8%E5%86%8C%E9%97%AE%E9%A2%98">[帮助] 应用注册问题</a></b>.
     ]]></string>
     <string name="status_app_not_registered_title">Unregistered</string>
+    <string name="registration_action_register_now">Register now</string>
+    <string name="registration_action_register_again">Register again</string>
+    <string name="registration_action_description">This clears the target app\'s existing push registration data and asks it to register with the push service again. The target app may be opened or restarted.</string>
 
     <string name="group_notifications_for_same_session_title">Group all notifications for the same session</string>
     <string name="group_notifications_for_same_session_detail">the same session notifications will be group, and the non-session notifications will not be group</string>

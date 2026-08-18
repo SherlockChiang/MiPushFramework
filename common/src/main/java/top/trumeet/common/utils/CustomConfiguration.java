@@ -463,7 +463,8 @@ public class CustomConfiguration {
         }
 
         public boolean isUsable() {
-            return parameter != null || !pictureUrls.isEmpty();
+            return (parameter != null && !parameter.trim().isEmpty())
+                    || !pictureUrls.isEmpty();
         }
 
         public static boolean isSupportedProtocolVersion(int version) {

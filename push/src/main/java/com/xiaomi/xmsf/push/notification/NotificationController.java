@@ -86,8 +86,6 @@ public class NotificationController {
     // The official client permits a much longer network timeout. Holding our
     // notification worker for that long can starve all push notifications, so the
     // native-icon enhancement gets a small global budget while the URL payload stays.
-    private static final long FOCUS_DOWNLOAD_CALLER_BUDGET_MILLIS = 5_000L;
-
     public static final String CHANNEL_WARN = "warn";
 
     public static NotificationManagerEx getNotificationManagerEx() {
@@ -115,7 +113,8 @@ public class NotificationController {
         // The summary is an implementation detail of Android notification
         // grouping.  It has no application focus payload of its own; processing
         // the source message again here would duplicate extras and image work.
-        notify(context, groupId.hashCode(), packageName, builder, metaInfo, false);
+        notify(context, groupId.hashCode(), packageName, getNotificationTag(packageName),
+                builder, metaInfo, false, false);
     }
 
     @RequiresApi(api = Build.VERSION_CODES.M)
@@ -154,10 +153,63 @@ public class NotificationController {
         applyAlertBehavior(metaInfo, packageName, notificationBuilder);
         notificationBuilder.setPriority(Notification.PRIORITY_HIGH);
 
-        Notification notification = notify(context, notificationId, packageName,
-                notificationBuilder, metaInfo, true);
+        boolean attemptFocus = shouldAttachFocusExtras(context, metaInfo);
+        if (attemptFocus) {
+            // The official group supplied by the client always wins. Debug and
+            // other direct callers otherwise get a stable focus-only group so a
+            // normal notification from the same app cannot fold it away.
+            boolean hasOfficialGroup = hasOfficialNotificationGroup(metaInfo);
+            try {
+                Notification preview = notificationBuilder.build();
+                String existingGroup = preview.getGroup();
+                if (!hasOfficialGroup
+                        && (TextUtils.isEmpty(existingGroup)
+                        || packageName.equals(existingGroup))) {
+                    notificationBuilder.setGroup(
+                            FocusNotificationSafety.stableFocusGroup(packageName));
+                }
+            } catch (Throwable error) {
+                logger.w("Unable to inspect focus-notification group", error);
+            }
+        }
+
+        String notificationTag = getNotificationTag(packageName);
+        Notification notification = FocusNotificationSafety.deliverWithSingleFallback(
+                packageName,
+                notificationTag,
+                notificationId,
+                attemptFocus,
+                (deliveryPackage, deliveryTag, deliveryId, includeFocusExtras,
+                 focusFailure) -> {
+                    if (!includeFocusExtras) {
+                        if (focusFailure != null) {
+                            logger.w("Focus notification failed; retrying as a standard notification",
+                                    focusFailure);
+                        }
+                        stripFocusNotificationExtras(notificationBuilder);
+                    }
+                    return notify(context, deliveryId, deliveryPackage, deliveryTag,
+                            notificationBuilder, metaInfo, true, includeFocusExtras);
+                });
 
         updateSummaryNotification(context, metaInfo, packageName, notification.getGroup());
+    }
+
+    private static boolean hasOfficialNotificationGroup(@Nullable PushMetaInfo metaInfo) {
+        if (metaInfo == null) {
+            return false;
+        }
+        try {
+            CustomConfiguration configuration = XMPushUtils.getConfiguration(metaInfo);
+            String configuredGroup = configuration.notificationGroup(null);
+            return (configuredGroup != null && !configuredGroup.trim().isEmpty())
+                    || metaInfo.passThrough == 1;
+        } catch (Throwable error) {
+            // If metadata cannot be inspected, preserving a caller-supplied
+            // group is safer than guessing that it is the SDK default.
+            logger.w("Unable to inspect official notification group", error);
+            return true;
+        }
     }
 
     @NonNull
@@ -175,8 +227,9 @@ public class NotificationController {
 
     private static Notification notify(
             Context context, int notificationId, String packageName,
-            NotificationCompat.Builder notificationBuilder, PushMetaInfo metaInfo,
-            boolean includeFocusExtras) {
+            String notificationTag, NotificationCompat.Builder notificationBuilder,
+            PushMetaInfo metaInfo,
+            boolean includeOfficialMetadata, boolean includeFocusExtras) {
         // Make the behavior consistent with official MIUI
         Bundle extras = new Bundle();
         extras.putString("target_package", packageName);
@@ -185,8 +238,9 @@ public class NotificationController {
         // Set small icon
         processIcon(context, packageName, notificationBuilder);
 
-        if (includeFocusExtras) {
-            CustomConfiguration configuration = XMPushUtils.getConfiguration(metaInfo);
+        CustomConfiguration configuration = null;
+        if (includeOfficialMetadata) {
+            configuration = XMPushUtils.getConfiguration(metaInfo);
             applyOfficialMetadata(context, packageName, notificationBuilder, configuration);
             String iconUri = configuration.notificationLargeIconUri(null);
             Bitmap largeIcon = getLargeIcon(context, metaInfo, iconUri);
@@ -197,6 +251,12 @@ public class NotificationController {
             String subText = configuration.subText(null);
             buildExtraSubText(context, packageName, notificationBuilder, subText);
 
+        }
+
+        ensureReadableStandardContent(context, packageName, notificationBuilder,
+                metaInfo, configuration);
+
+        if (includeFocusExtras && configuration != null) {
             addFocusNotificationExtras(context, notificationBuilder, configuration);
         }
 
@@ -204,8 +264,120 @@ public class NotificationController {
         Notification notification = notificationBuilder.build();
         applyTargetPackage(context, notification, packageName);
         getNotificationManagerEx().notify(
-                packageName, getNotificationTag(packageName), notificationId, notification);
+                packageName, notificationTag, notificationId, notification);
         return notification;
+    }
+
+    private static boolean shouldAttachFocusExtras(Context context, PushMetaInfo metaInfo) {
+        try {
+            CustomConfiguration configuration = XMPushUtils.getConfiguration(metaInfo);
+            CustomConfiguration.FocusNotificationPayload payload =
+                    configuration.focusNotificationPayload();
+            if (!payload.isUsable() || !isFocusProtocolEnabled(context)) {
+                return false;
+            }
+            // Do not hand malformed JSON to the private renderer. Valid picture
+            // URL fields remain independently useful and are still forwarded.
+            return FocusNotificationSafety.isWellFormedParameter(payload.parameter())
+                    || !payload.pictureUrls().isEmpty();
+        } catch (Throwable error) {
+            logger.w("Unable to inspect focus-notification payload", error);
+            return false;
+        }
+    }
+
+    private static void stripFocusNotificationExtras(
+            NotificationCompat.Builder notificationBuilder) {
+        try {
+            stripFocusNotificationExtras(notificationBuilder.getExtras());
+        } catch (Throwable error) {
+            // A malformed Parcelable in a third-party payload must not prevent
+            // the standard retry from being attempted.
+            logger.w("Unable to fully strip focus-notification extras", error);
+        }
+    }
+
+    private static void stripFocusNotificationExtras(@Nullable Bundle extras) {
+        if (extras == null) {
+            return;
+        }
+        // NotificationCompat.addExtras() flattens the focus bundle into the
+        // builder's top-level extras. Removing those protocol keys directly is
+        // sufficient and avoids traversing arbitrary third-party Bundles (which
+        // may be self-referential or contain unparcelable values).
+        for (String key : new ArrayList<>(extras.keySet())) {
+            try {
+                if (FocusNotificationSafety.isFocusExtraKey(key)) {
+                    extras.remove(key);
+                }
+            } catch (Throwable error) {
+                // Keep walking the remaining keys. Bundle access can throw for
+                // a bad parcelable, but no focus key should block delivery.
+            }
+        }
+    }
+
+    private static void ensureReadableStandardContent(
+            Context context,
+            String packageName,
+            NotificationCompat.Builder notificationBuilder,
+            PushMetaInfo metaInfo,
+            @Nullable CustomConfiguration configuration) {
+        String existingTitle = null;
+        String existingBody = null;
+        try {
+            Notification preview = notificationBuilder.build();
+            if (preview.extras != null) {
+                CharSequence title = preview.extras.getCharSequence(Notification.EXTRA_TITLE);
+                CharSequence body = preview.extras.getCharSequence(Notification.EXTRA_TEXT);
+                existingTitle = title == null ? null : title.toString();
+                existingBody = body == null ? null : body.toString();
+            }
+        } catch (Throwable error) {
+            logger.w("Unable to inspect standard notification content", error);
+        }
+
+        String metaTitle = metaInfo == null ? null : metaInfo.getTitle();
+        String metaBody = metaInfo == null ? null : metaInfo.getDescription();
+        String focusParameter = null;
+        if (configuration != null) {
+            try {
+                focusParameter = configuration.focusParam(null);
+            } catch (Throwable error) {
+                logger.w("Unable to read focus-notification parameter", error);
+            }
+        }
+        String fallbackTitle = packageName;
+        try {
+            CharSequence appName = Global.ApplicationNameCache().getAppName(context, packageName);
+            if (appName != null && appName.length() > 0) {
+                fallbackTitle = appName.toString();
+            }
+        } catch (Throwable ignored) {
+        }
+
+        FocusNotificationSafety.ResolvedContent resolved =
+                FocusNotificationSafety.resolveReadableContent(
+                        firstReadable(existingTitle, metaTitle),
+                        firstReadable(existingBody, metaBody),
+                        focusParameter,
+                        fallbackTitle,
+                        "New notification");
+        if (!hasReadableText(existingTitle)) {
+            notificationBuilder.setContentTitle(resolved.title());
+        }
+        if (!hasReadableText(existingBody)) {
+            notificationBuilder.setContentText(resolved.body());
+        }
+    }
+
+    @Nullable
+    private static String firstReadable(@Nullable String first, @Nullable String second) {
+        return hasReadableText(first) ? first : second;
+    }
+
+    private static boolean hasReadableText(@Nullable String value) {
+        return value != null && !value.trim().isEmpty();
     }
 
     private static void applyOfficialMetadata(
@@ -382,7 +554,9 @@ public class NotificationController {
         }
 
         Bundle focusBundle = new Bundle();
-        focusBundle.putString(FOCUS_PARAM, payload.parameter());
+        if (FocusNotificationSafety.isWellFormedParameter(payload.parameter())) {
+            focusBundle.putString(FOCUS_PARAM, payload.parameter());
+        }
         for (Map.Entry<String, String> picture : payload.pictureUrls().entrySet()) {
             // Supported MIUI SystemUI needs both the URL and the native Icon.
             focusBundle.putString(picture.getKey(), picture.getValue());
@@ -460,7 +634,8 @@ public class NotificationController {
 
             Bundle result = new Bundle();
             long deadlineNanos = System.nanoTime()
-                    + TimeUnit.MILLISECONDS.toNanos(FOCUS_DOWNLOAD_CALLER_BUDGET_MILLIS);
+                    + TimeUnit.MILLISECONDS.toNanos(
+                            FocusNotificationSafety.IMAGE_ENRICHMENT_BUDGET_MILLIS);
             for (int i = 0; i < pictures.size(); i++) {
                 Bitmap bitmap = null;
                 long remainingNanos = deadlineNanos - System.nanoTime();
@@ -471,13 +646,26 @@ public class NotificationController {
                         logger.w("Unable to download focus-notification picture", error);
                     } catch (InterruptedException error) {
                         Thread.currentThread().interrupt();
+                    } catch (java.util.concurrent.CancellationException error) {
                     }
                 }
-                Icon icon = bitmap == null || bitmap.isRecycled()
-                        ? null : Icon.createWithBitmap(bitmap);
+                Icon icon = null;
+                if (bitmap != null && !bitmap.isRecycled()) {
+                    try {
+                        icon = Icon.createWithBitmap(bitmap);
+                    } catch (Throwable error) {
+                        logger.w("Unable to create native focus-notification icon", error);
+                    }
+                }
                 // Official XMSF retains the key with a null value on failure.
                 result.putParcelable(pictures.get(i).getKey(), icon);
             }
+            // Keep the URL keys in the parent focus bundle even when one or
+            // more native icons failed. The URL is part of Xiaomi's original
+            // protocol; a null/omitted native Icon is the documented safe
+            // degradation. Binder/build failures are handled by publish's
+            // single focus-stripping retry, while a slow or bad image never
+            // blocks the standard notification past the caller budget.
             return result;
         }
 

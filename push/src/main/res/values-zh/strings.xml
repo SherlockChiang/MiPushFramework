@@ -232,6 +232,9 @@
     <string name="footer_app_ignored_not_registered">已忽略 %1$s 个无 MiPush SDK 的应用</string>
     <string name="status_app_not_registered_detail_without_fake_suggest"><![CDATA[注册由应用决定并主动发起，通常在打开应用时自动进行。部分应用只在检测到小米设备时才进行注册。另见：<b><a href="https://github.com/MiPushFramework/MiPushFramework/wiki/%E5%BA%94%E7%94%A8%E7%A8%8B%E5%BC%8F%E6%B3%A8%E5%86%8C%E9%97%AE%E9%A2%98%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88">应用程式注册问题解决方案</a></b> 和 <b><a href="https://github.com/MiPushFramework/MiPushFramework/wiki/%5B%E5%B8%AE%E5%8A%A9%5D-%E5%BA%94%E7%94%A8%E6%B3%A8%E5%86%8C%E9%97%AE%E9%A2%98">[帮助] 应用注册问题</a></b>。]]></string>
     <string name="status_app_not_registered_detail_with_fake_suggest"><![CDATA[注册由应用决定并主动发起，通常在打开应用时自动进行。部分应用只在检测到小米设备时才进行注册，您可以尝试 <b><a href="https://github.com/Magisk-Modules-Repo/MiPushFake">Magisk 全局伪装模块</a></b> 或 <b><a href="https://github.com/TimothyZhang023/Riru-MiPushFake">Magisk 单应用伪装模块</a></b> 以增加成功率。另见：<b><a href="https://github.com/MiPushFramework/MiPushFramework/wiki/%E5%BA%94%E7%94%A8%E7%A8%8B%E5%BC%8F%E6%B3%A8%E5%86%8C%E9%97%AE%E9%A2%98%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88">应用程式注册问题解决方案</a></b> 和 <b><a href="https://github.com/MiPushFramework/MiPushFramework/wiki/%5B%E5%B8%AE%E5%8A%A9%5D-%E5%BA%94%E7%94%A8%E6%B3%A8%E5%86%8C%E9%97%AE%E9%A2%98">[帮助] 应用注册问题</a></b>。]]></string>
+    <string name="registration_action_register_now">立即注册</string>
+    <string name="registration_action_register_again">重新注册</string>
+    <string name="registration_action_description">这会清除目标应用现有的推送注册信息，并请求它重新向推送服务注册。目标应用可能会被打开或重启。</string>
     <string name="action_search">搜索</string>
     <string name="last_receive">最近接收时间：</string>
     <string name="mipush_services_not_found">推送服务未找到</string>

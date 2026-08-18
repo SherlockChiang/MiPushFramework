@@ -49,6 +49,7 @@ import com.xiaomi.push.sdk.MyPushMessageHandler;
 import com.xiaomi.xmpush.thrift.PushMetaInfo;
 import com.xiaomi.xmpush.thrift.XmPushActionContainer;
 import com.xiaomi.xmsf.R;
+import com.xiaomi.xmsf.push.notification.FocusNotificationSafety;
 import com.xiaomi.xmsf.push.notification.NotificationController;
 import com.xiaomi.xmsf.push.utils.Configurations;
 import com.xiaomi.xmsf.push.utils.IconConfigurations;
@@ -312,7 +313,8 @@ public class MyMIPushNotificationHelper {
         if (useMessagingStyle) {
             notificationBuilder = messagingStyleNotificationBuilder(context, container, notificationId, message, pkgCtx);
         } else {
-            notificationBuilder = normalStyleNotificationBuilder(context, container.getMetaInfo());
+            notificationBuilder = normalStyleNotificationBuilder(
+                    context, container.getPackageName(), container.getMetaInfo());
         }
 
         if (metaInfo.getExtra() != null) {
@@ -362,10 +364,24 @@ public class MyMIPushNotificationHelper {
     }
 
     @NonNull
-    private static NotificationCompat.Builder normalStyleNotificationBuilder(Context context, PushMetaInfo metaInfo) {
-        String title = metaInfo.getTitle();
-        String description = metaInfo.getDescription();
+    private static NotificationCompat.Builder normalStyleNotificationBuilder(
+            Context context, String packageName, PushMetaInfo metaInfo) {
         CustomConfiguration configuration = XMPushUtils.getConfiguration(metaInfo);
+        String focusParameter = configuration.focusParam(null);
+        String fallbackTitle = packageName;
+        try {
+            CharSequence appName = Global.ApplicationNameCache().getAppName(context, packageName);
+            if (appName != null && appName.length() > 0) {
+                fallbackTitle = appName.toString();
+            }
+        } catch (Throwable ignored) {
+        }
+        FocusNotificationSafety.ResolvedContent resolved =
+                FocusNotificationSafety.resolveReadableContent(
+                        metaInfo.getTitle(), metaInfo.getDescription(), focusParameter,
+                        fallbackTitle, "New notification");
+        String title = resolved.title();
+        String description = resolved.body();
         CustomConfiguration.NotificationStyle notificationStyle =
                 configuration.notificationStyle();
 
@@ -408,8 +424,12 @@ public class MyMIPushNotificationHelper {
         }
 
         String[] titleAndDesp = determineTitleAndDespByDIP(context, metaInfo);
-        notificationBuilder.setContentTitle(titleAndDesp[0]);
-        notificationBuilder.setContentText(titleAndDesp[1]);
+        FocusNotificationSafety.ResolvedContent dipResolved =
+                FocusNotificationSafety.resolveReadableContent(
+                        titleAndDesp[0], titleAndDesp[1], focusParameter,
+                        title, description);
+        notificationBuilder.setContentTitle(dipResolved.title());
+        notificationBuilder.setContentText(dipResolved.body());
         return notificationBuilder;
     }
 
@@ -590,15 +610,29 @@ public class MyMIPushNotificationHelper {
         RegisteredApplication application = RegisteredApplicationDb.getRegisteredApplication(packageName);
 
         CustomConfiguration configuration = XMPushUtils.getConfiguration(metaInfo);
-        String group = configuration.notificationGroup(null);
-        if (group != null) {
+        String configuredGroup = configuration.notificationGroup(null);
+        if (configuredGroup != null && !configuredGroup.trim().isEmpty()) {
+            String group = configuredGroup;
             group = packageName + "_" + GROUP_TYPE_MIPUSH_GROUP + "_" + group;
+            return group;
         } else if (metaInfo.passThrough == 1) {
-            group = packageName + "_" + GROUP_TYPE_PASS_THROUGH;
+            return packageName + "_" + GROUP_TYPE_PASS_THROUGH;
         } else {
-            group = packageName;
+            CustomConfiguration.FocusNotificationPayload focusPayload =
+                    configuration.focusNotificationPayload();
+            boolean hasDeliverableFocusPayload =
+                    FocusNotificationSafety.isWellFormedParameter(focusPayload.parameter())
+                            || !focusPayload.pictureUrls().isEmpty();
+            if (FocusNotificationSafety.shouldIsolateFocusGroup(
+                    configuredGroup, hasDeliverableFocusPayload)) {
+                return FocusNotificationSafety.stableFocusGroup(packageName);
+            }
         }
-        return group;
+        // This is the SDK's historical default for ordinary notifications. A
+        // focus payload takes the isolated branch above unless the sender gave
+        // an explicit official group, preventing SystemUI from folding it into
+        // unrelated package notifications.
+        return packageName;
     }
 
     private static void addDebugAction(Context xmPushService, XmPushActionContainer buildContainer, byte[] var1, PushMetaInfo metaInfo, String packageName, NotificationCompat.Builder localBuilder) {
