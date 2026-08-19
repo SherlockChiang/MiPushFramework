@@ -301,6 +301,12 @@ This could be the application doing a reverse registration, or the registration 
     <string name="group_notifications_for_same_session_clear_title">clear all notifications of session when the notification of session was clicked</string>
     <string name="show_pass_through">show \"pass through\" message as notification</string>
     <string name="action_search">Search</string>
+    <string name="action_refresh">Refresh</string>
+    <string name="action_back_to_top">Back to top</string>
+    <string name="application_filter_all">All</string>
+    <string name="application_filter_registered">Registered</string>
+    <string name="application_filter_unregistered">Has problems</string>
+    <string name="application_filter_not_registered">Not registered</string>
     <string name="last_receive">last receive: </string>
     <string name="mipush_services_not_found">Services Not Found</string>
     <string name="try_to_force_register_all_applications">Try to force register all applications</string>

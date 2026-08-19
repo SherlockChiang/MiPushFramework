@@ -12,9 +12,12 @@ object RegistrationStateStyle {
     val YellowColor = Color(0xffff9800)
 
     fun contentOf(app: RegisteredApplication, context: Context): Pair<String, Color> {
-        val prefix =
-            if (!app.existServices) context.getString(R.string.mipush_services_not_found) + " - "
-            else ""
+        // A registered event is authoritative.  Some ROMs hide or protect the target SDK
+        // service from package discovery even though the app is already registered; prefixing
+        // that row with "services not found" incorrectly downgrades a successful registration.
+        val prefix = if (shouldShowMissingServices(app.registeredType, app.existServices)) {
+            context.getString(R.string.mipush_services_not_found) + " - "
+        } else ""
         val color = colorOf(app)
         return when (app.registeredType) {
             RegisteredApplication.RegisteredType.Registered -> {
@@ -33,20 +36,23 @@ object RegistrationStateStyle {
     }
 
     fun colorOf(app: RegisteredApplication): Color {
-        return if (!app.existServices) ErrorColor
-        else when (app.registeredType) {
+        return when (app.registeredType) {
             RegisteredApplication.RegisteredType.Registered -> {
                 GreenColor
             }
 
             RegisteredApplication.RegisteredType.Unregistered -> {
-                YellowColor
+                if (!app.existServices) ErrorColor else YellowColor
             }
 
 //      RegisteredApplication.RegisteredType.NotRegistered
             else -> {
-                Color.Unspecified
+                if (!app.existServices) ErrorColor else Color.Unspecified
             }
         }
     }
+
+    /** Missing-service diagnostics apply only to rows that are not already registered. */
+    fun shouldShowMissingServices(registeredType: Int, existServices: Boolean): Boolean =
+        !existServices && registeredType != RegisteredApplication.RegisteredType.Registered
 }

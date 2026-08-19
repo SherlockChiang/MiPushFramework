@@ -236,6 +236,12 @@
     <string name="registration_action_register_again">重新注册</string>
     <string name="registration_action_description">这会清除目标应用现有的推送注册信息，并请求它重新向推送服务注册。目标应用可能会被打开或重启。</string>
     <string name="action_search">搜索</string>
+    <string name="action_refresh">刷新</string>
+    <string name="action_back_to_top">回到顶部</string>
+    <string name="application_filter_all">全部</string>
+    <string name="application_filter_registered">已注册</string>
+    <string name="application_filter_unregistered">有问题</string>
+    <string name="application_filter_not_registered">未注册</string>
     <string name="last_receive">最近接收时间：</string>
     <string name="mipush_services_not_found">推送服务未找到</string>
     <string name="try_to_force_register_all_applications">尝试强制注册所有应用</string>

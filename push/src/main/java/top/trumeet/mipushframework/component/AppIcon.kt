@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalInspectionMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -40,5 +41,5 @@ fun AppIcon(packageName: String, appName: String?, modifier: Modifier = Modifier
             }
         }
     }
-    Image(icon, appName, modifier = modifier)
+    Image(icon, appName, modifier = modifier, contentScale = ContentScale.Fit)
 }

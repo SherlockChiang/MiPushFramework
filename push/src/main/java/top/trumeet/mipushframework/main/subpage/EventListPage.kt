@@ -48,6 +48,7 @@ import top.trumeet.mipushframework.component.MiuixDialog
 import top.trumeet.mipushframework.component.RefreshableLazyColumn
 import top.trumeet.mipushframework.component.TextView
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -196,28 +197,49 @@ fun EventList(
         else mutableStateListOf()
     }
 
+    var hasMore by rememberSaveable(query, packageName) { mutableStateOf(true) }
 
     val refreshScope = rememberCoroutineScope { Dispatchers.IO }
     val doLoadMore: (onRefreshed: () -> Unit) -> Unit = { onRefreshed ->
         refreshScope.launch {
-            items.addAll(getEvents(items.isEmpty()))
-            onRefreshed()
+            try {
+                val elements = getEvents(items.isEmpty())
+                withContext(Dispatchers.Main) {
+                    val knownIds = items.asSequence().map { it.id }.toHashSet()
+                    val newElements = elements.filter { knownIds.add(it.id) }
+                    items.addAll(newElements)
+                    // A short page is the authoritative end-of-data signal.  Empty pages must
+                    // also stop the observer, otherwise an empty list satisfies size - 10 and
+                    // causes an endless load loop.
+                    hasMore = elements.size >= Constants.PAGE_SIZE && newElements.isNotEmpty()
+                    onRefreshed()
+                }
+            } catch (t: Throwable) {
+                withContext(Dispatchers.Main) { onRefreshed() }
+            }
         }
     }
     var isNeedRefresh by rememberSaveable(query) { mutableStateOf(true) }
     val doRefresh: (onRefreshed: () -> Unit) -> Unit = { onRefreshed ->
         refreshScope.launch {
-            val elements = getEvents(true)
-            withContext(Dispatchers.Main) {
-                items.clear()
-                items.addAll(elements)
-                isNeedRefresh = false
-                onRefreshed()
+            try {
+                val elements = getEvents(true)
+                withContext(Dispatchers.Main) {
+                    items.clear()
+                    items.addAll(elements.distinctBy { it.id })
+                    hasMore = elements.size >= Constants.PAGE_SIZE && elements.isNotEmpty()
+                    isNeedRefresh = false
+                    onRefreshed()
+                }
+            } catch (t: Throwable) {
+                withContext(Dispatchers.Main) { onRefreshed() }
             }
         }
     }
 
-    val isNeedMore: (Int) -> Boolean = { it >= items.size - 10 }
+    val isNeedMore: (Int) -> Boolean = { lastIndex ->
+        hasMore && items.isNotEmpty() && lastIndex >= (items.size - 10).coerceAtLeast(0)
+    }
 
     RefreshableLazyColumn(doRefresh, isNeedMore, doLoadMore, isNeedRefresh) {
         items(items, { it.id }) {
@@ -230,23 +252,31 @@ fun EventList(
 private fun EventItem(item: EventInfoForDisplay, onClick: (EventInfoForDisplay) -> Unit) {
     val disabled = item.configOptions.contains("disable")
     val alpha = if (disabled) 0.5f else 1f
-    Row(
-        Modifier
-            .clickable { onClick(item) }
-            .padding(10.dp).alpha(alpha),
-        verticalAlignment = Alignment.CenterVertically
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 5.dp),
     ) {
-        AppIcon(item.packageName, item.appName, modifier = Modifier.size(48.dp))
-        Spacer(Modifier.width(20.dp))
-        Column {
-            Row {
-                ConfigOptions(item)
-                ChannelInfo(item)
-                Spacer(Modifier.weight(1f))
-                EventReceiveDate(item)
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable { onClick(item) }
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+                .alpha(alpha),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            AppIcon(item.packageName, item.appName, modifier = Modifier.size(48.dp))
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Row {
+                    ConfigOptions(item)
+                    ChannelInfo(item)
+                    Spacer(Modifier.weight(1f))
+                    EventReceiveDate(item)
+                }
+                EventTitle(item)
+                EventContent(item)
             }
-            EventTitle(item)
-            EventContent(item)
         }
     }
 }
