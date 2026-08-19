@@ -212,6 +212,10 @@ dependencies {
 
 // Test {
     testImplementation 'junit:junit:4.13.2'
+    // Android's mockable android.jar exposes org.json methods as throwing stubs in
+    // local JVM tests. Use the platform-compatible JSON implementation for parser
+    // tests; this remains test-only and is never packaged into the APK.
+    testImplementation 'org.json:json:20180813'
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.6.1'
     androidTestImplementation("org.mockito:mockito-android:4.11.0")
