@@ -254,6 +254,7 @@
     <string name="application_filter_not_registered">未注册</string>
     <string name="last_receive">最近接收时间：</string>
     <string name="mipush_services_not_found">推送服务未找到</string>
+    <string name="mipush_services_unknown">无法确认推送服务状态</string>
     <string name="try_to_force_register_all_applications">尝试强制注册所有应用</string>
     <string name="request_battery_whitelist">推送服务需要加入“电池优化”白名单才能正常运行。</string>
     <string name="group_notifications_for_same_session_title">聚合同一会话的所有通知</string>
