@@ -49,6 +49,11 @@ public class Configurations {
         return loader.getUnresolvedReferences();
     }
 
+    /** Returns the immutable status and diagnostics for the last published configuration load. */
+    public ConfigurationDiagnosticsSnapshot getDiagnosticsSnapshot() {
+        return loader.getDiagnosticsSnapshot();
+    }
+
     public Set<String> handle(String packageName, XmPushActionContainer data)
             throws JSONException, NoSuchFieldException, IllegalAccessException, InvocationTargetException, NoSuchMethodException {
         String[] checkPkgs = new String[]{"^", packageName, "$"};
