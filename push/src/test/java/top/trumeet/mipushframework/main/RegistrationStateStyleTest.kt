@@ -1,5 +1,6 @@
 package top.trumeet.mipushframework.main
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -49,6 +50,21 @@ class RegistrationStateStyleTest {
             RegistrationStateStyle.shouldShowMissingServices(
                 RegisteredType.Unregistered,
                 ServiceProbeState.UNKNOWN,
+            ),
+        )
+    }
+
+    @Test
+    fun legacyPositiveServiceFlagResolvesToPresent() {
+        val app = top.trumeet.mipush.provider.entities.RegisteredApplication().apply {
+            existServices = true
+        }
+
+        assertEquals(ServiceProbeState.PRESENT, app.getServiceProbeState())
+        assertFalse(
+            RegistrationStateStyle.shouldShowMissingServices(
+                RegisteredType.NotRegistered,
+                app.getServiceProbeState(),
             ),
         )
     }

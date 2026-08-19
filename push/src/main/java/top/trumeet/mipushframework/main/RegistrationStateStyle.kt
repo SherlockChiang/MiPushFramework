@@ -12,14 +12,18 @@ object RegistrationStateStyle {
     val YellowColor = Color(0xffff9800)
 
     fun contentOf(app: RegisteredApplication, context: Context): Pair<String, Color> {
+        // Keep rows created by older callers compatible with the legacy boolean field.  New
+        // loaders publish the explicit tri-state, while getServiceProbeState() maps a legacy
+        // `existServices = true` to PRESENT without persisting probe metadata.
+        val probeState = app.getServiceProbeState()
         // A registered event is authoritative.  Some ROMs hide or protect the target SDK
         // service from package discovery even though the app is already registered; prefixing
         // that row with "services not found" incorrectly downgrades a successful registration.
         val prefix = when {
             app.registeredType == RegisteredApplication.RegisteredType.Registered -> ""
-            shouldShowMissingServices(app.registeredType, app.serviceProbeState) ->
+            shouldShowMissingServices(app.registeredType, probeState) ->
                 context.getString(R.string.mipush_services_not_found) + " - "
-            app.serviceProbeState == RegisteredApplication.ServiceProbeState.UNKNOWN ->
+            probeState == RegisteredApplication.ServiceProbeState.UNKNOWN ->
                 context.getString(R.string.mipush_services_unknown) + " - "
             else -> ""
         }
@@ -41,13 +45,14 @@ object RegistrationStateStyle {
     }
 
     fun colorOf(app: RegisteredApplication): Color {
+        val probeState = app.getServiceProbeState()
         return when (app.registeredType) {
             RegisteredApplication.RegisteredType.Registered -> {
                 GreenColor
             }
 
             RegisteredApplication.RegisteredType.Unregistered -> {
-                when (app.serviceProbeState) {
+                when (probeState) {
                     RegisteredApplication.ServiceProbeState.MISSING -> ErrorColor
                     RegisteredApplication.ServiceProbeState.UNKNOWN -> YellowColor
                     RegisteredApplication.ServiceProbeState.PRESENT -> YellowColor
@@ -56,7 +61,7 @@ object RegistrationStateStyle {
 
 //      RegisteredApplication.RegisteredType.NotRegistered
             else -> {
-                when (app.serviceProbeState) {
+                when (probeState) {
                     RegisteredApplication.ServiceProbeState.MISSING -> ErrorColor
                     RegisteredApplication.ServiceProbeState.UNKNOWN -> YellowColor
                     RegisteredApplication.ServiceProbeState.PRESENT -> Color.Unspecified
