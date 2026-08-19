@@ -105,7 +105,7 @@ public class ApplicationPageOperation {
             application = registerApplication(currentAppPkgName);
         }
         RegisteredApplication.ServiceProbeState probeState = probeMiPushServices(checker, info);
-        application.serviceProbeState = probeState;
+        application.setServiceProbeState(probeState);
         // Keep the legacy boolean populated for Java/Kotlin callers and older UI code.
         application.existServices = probeState == RegisteredApplication.ServiceProbeState.PRESENT;
         return application;
@@ -138,13 +138,28 @@ public class ApplicationPageOperation {
             return RegisteredApplication.ServiceProbeState.UNKNOWN;
         }
         try {
-            return checker.checkServices(info)
-                    ? RegisteredApplication.ServiceProbeState.PRESENT
-                    : RegisteredApplication.ServiceProbeState.MISSING;
+            return mapServiceCheckResult(checker.checkServicesState(info));
         } catch (Throwable ignored) {
             // A checker implementation is loaded from the system push package and may fail on
             // vendor-specific metadata.  Preserve that distinction for the UI.
             return RegisteredApplication.ServiceProbeState.UNKNOWN;
+        }
+    }
+
+    /** Pure mapping kept separate so probe-state behavior can be tested without Android services. */
+    public static RegisteredApplication.ServiceProbeState mapServiceCheckResult(
+            MiPushManifestChecker.ServiceCheckResult result) {
+        if (result == null) {
+            return RegisteredApplication.ServiceProbeState.UNKNOWN;
+        }
+        switch (result) {
+            case PRESENT:
+                return RegisteredApplication.ServiceProbeState.PRESENT;
+            case MISSING:
+                return RegisteredApplication.ServiceProbeState.MISSING;
+            case UNKNOWN:
+            default:
+                return RegisteredApplication.ServiceProbeState.UNKNOWN;
         }
     }
 

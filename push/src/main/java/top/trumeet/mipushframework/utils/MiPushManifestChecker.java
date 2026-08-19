@@ -25,6 +25,13 @@ import top.trumeet.common.Constants;
 public class MiPushManifestChecker {
     private static final String TAG = MiPushManifestChecker.class.getSimpleName();
 
+    /** Result of checking the target app's required MiPush SDK services. */
+    public enum ServiceCheckResult {
+        PRESENT,
+        MISSING,
+        UNKNOWN
+    }
+
     private final Context context;
     private final Class manifestChecker;
     private final Method checkServicesMethod;
@@ -78,7 +85,12 @@ public class MiPushManifestChecker {
         return result;
     }
 
-    public boolean checkServices(PackageInfo pkgInfo) {
+    /**
+     * Check services while preserving the distinction between an invalid manifest and a probe
+     * failure.  The old boolean API could only return false and consequently made PackageManager
+     * or vendor-runtime failures look like a missing SDK service.
+     */
+    public ServiceCheckResult checkServicesState(PackageInfo pkgInfo) {
         try {
             Map<String, String> configServiceProcessMap = new HashMap<>();
             Map<String, ManifestChecker.ServiceCheckInfo> requiredServicesMap = new HashMap<>();
@@ -116,15 +128,21 @@ public class MiPushManifestChecker {
             if (configServiceProcessMap.containsKey(PushConstants.XM_SERVICE_CLASS_NAME_JAR) && configServiceProcessMap.containsKey(PushConstants.PUSH_SERVICE_CLASS_NAME_JAR) && !TextUtils.equals(configServiceProcessMap.get(PushConstants.XM_SERVICE_CLASS_NAME_JAR), configServiceProcessMap.get(PushConstants.PUSH_SERVICE_CLASS_NAME_JAR))) {
                 throw new ManifestChecker.IllegalManifestException(String.format("\"%1$s\" and \"%2$s\" must be running in the same process.", PushConstants.XM_SERVICE_CLASS_NAME_JAR, PushConstants.PUSH_SERVICE_CLASS_NAME_JAR));
             }
-            return true;
+            return ServiceCheckResult.PRESENT;
         } catch (Throwable e) {
-            if (!isIllegalManifestException(e)) {
-                Log.e(TAG, "checkServices", e);
-            } else {
+            if (isIllegalManifestException(e)) {
                 Log.w(TAG, "checkServices: " + pkgInfo.packageName + "," + e.getMessage());
+                return ServiceCheckResult.MISSING;
+            } else {
+                Log.e(TAG, "checkServices", e);
+                return ServiceCheckResult.UNKNOWN;
             }
-            return false;
         }
+    }
+
+    /** Legacy boolean API retained for callers that only need a positive capability check. */
+    public boolean checkServices(PackageInfo pkgInfo) {
+        return checkServicesState(pkgInfo) == ServiceCheckResult.PRESENT;
     }
 
     private static boolean isIllegalManifestException(Throwable e) {
