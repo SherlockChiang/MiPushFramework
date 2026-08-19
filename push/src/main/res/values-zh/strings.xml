@@ -191,6 +191,16 @@
     <!-- Settings -->
     <string name="settings_summary_service_advance_setting">进入高级配置界面</string>
     <string name="settings_configuration_directory">设置配置目录</string>
+    <string name="settings_configuration_diagnostics">配置引用检查</string>
+    <string name="settings_configuration_diagnostics_checking">正在检查配置引用…</string>
+    <string name="settings_configuration_diagnostics_not_configured">尚未选择配置目录。</string>
+    <string name="settings_configuration_diagnostics_ready">未发现缺失的配置引用。</string>
+    <string name="settings_configuration_diagnostics_missing">发现 %1$d 个缺失的配置引用，相关规则可能不会生效。</string>
+    <string name="settings_configuration_diagnostics_failed">无法读取或解析配置目录。</string>
+    <string name="settings_configuration_diagnostics_refresh">重新检查</string>
+    <string name="settings_configuration_diagnostics_source">来源</string>
+    <string name="settings_configuration_diagnostics_owner">所属配置</string>
+    <string name="settings_configuration_diagnostics_reference">引用</string>
     <string name="settings_XMPP_server">设置 XMPP 服务器</string>
     <string name="settings_XMPP_server_summary">设置 发送/接收 消息的服务器</string>
 

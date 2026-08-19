@@ -220,6 +220,16 @@ Please grant the <b>Run in the background or wake up</b> permissions.
     <string name="settings_notification_permission_blocked">Permission is blocked. Tap to open system notification settings.</string>
     <string name="settings_summary_service_advance_setting">Advanced configurations interface</string>
     <string name="settings_configuration_directory">Change configuration directory</string>
+    <string name="settings_configuration_diagnostics">Configuration reference check</string>
+    <string name="settings_configuration_diagnostics_checking">Checking configuration references…</string>
+    <string name="settings_configuration_diagnostics_not_configured">No configuration directory selected.</string>
+    <string name="settings_configuration_diagnostics_ready">No missing configuration references.</string>
+    <string name="settings_configuration_diagnostics_missing">%1$d missing configuration reference(s); related rules may not take effect.</string>
+    <string name="settings_configuration_diagnostics_failed">Unable to read or parse the configuration directory.</string>
+    <string name="settings_configuration_diagnostics_refresh">Re-check</string>
+    <string name="settings_configuration_diagnostics_source">Source</string>
+    <string name="settings_configuration_diagnostics_owner">Owner</string>
+    <string name="settings_configuration_diagnostics_reference">Reference</string>
     <string name="settings_XMPP_server">Set XMPP server</string>
     <string name="settings_XMPP_server_summary">Set send/receive message server</string>
 

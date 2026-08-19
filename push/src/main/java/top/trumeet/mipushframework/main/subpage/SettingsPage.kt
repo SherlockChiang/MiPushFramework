@@ -10,8 +10,14 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -23,11 +29,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.nihility.Global
 import com.nihility.InternalMessenger
 import com.xiaomi.push.service.XMPushServiceMessenger
 import com.xiaomi.xmsf.R
 import com.xiaomi.xmsf.SettingUtils
+import com.xiaomi.xmsf.push.utils.ConfigurationDiagnosticsSnapshot
+import com.xiaomi.xmsf.push.utils.Configurations
 import top.trumeet.common.utils.Utils
 import top.trumeet.mipushframework.MainPageOperation
 import top.trumeet.mipushframework.component.SettingsGroup
@@ -98,6 +109,7 @@ private fun AppearanceBlock(
 @Composable
 private fun ServiceConfigurationBlock() {
     val context = LocalContext.current
+    var diagnosticsRefreshToken by remember { mutableStateOf(0) }
 
     SettingsGroup(title = stringResource(R.string.settings_service_setting)) {
         SettingsItem(
@@ -108,7 +120,13 @@ private fun ServiceConfigurationBlock() {
         }
 
         NotificationPermissionItem()
-        SetConfigurationsDirectory()
+        SetConfigurationsDirectory {
+            diagnosticsRefreshToken += 1
+        }
+        ConfigurationDiagnosticsItem(
+            refreshToken = diagnosticsRefreshToken,
+            onRefresh = { diagnosticsRefreshToken += 1 },
+        )
         SetXMPPServer(context)
     }
 }
@@ -216,7 +234,7 @@ private fun SetXMPPServer(context: Context) {
 }
 
 @Composable
-private fun SetConfigurationsDirectory() {
+private fun SetConfigurationsDirectory(onConfigurationChanged: () -> Unit = {}) {
     val context = LocalContext.current
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
@@ -228,6 +246,7 @@ private fun SetConfigurationsDirectory() {
             )
             SettingUtils.setConfigurationDirectory(context, uri)
             Global.ConfigCenter().loadConfigurations(context)
+            onConfigurationChanged()
         }
     }
 
@@ -237,6 +256,141 @@ private fun SetConfigurationsDirectory() {
     ) {
         launcher.launch(null)
     }
+}
+
+/**
+ * Shows configuration-reference diagnostics as a regular Miuix settings item.
+ *
+ * The snapshot is read from the configuration singleton only from a coroutine launched by an
+ * explicit refresh key. This keeps SAF timestamp checks and configuration I/O out of Compose
+ * recomposition, while still updating after a directory selection or a manual re-check.
+ */
+@Composable
+private fun ConfigurationDiagnosticsItem(
+    refreshToken: Int,
+    onRefresh: () -> Unit,
+) {
+    var snapshot by remember {
+        mutableStateOf(ConfigurationDiagnosticsSnapshot.notConfigured())
+    }
+    var refreshing by remember { mutableStateOf(false) }
+
+    LaunchedEffect(refreshToken) {
+        refreshing = true
+        snapshot = withContext(Dispatchers.IO) {
+            Configurations.getInstance().getDiagnosticsSnapshot()
+        }
+        refreshing = false
+    }
+
+    val summary = when {
+        refreshing -> stringResource(R.string.settings_configuration_diagnostics_checking)
+        snapshot.getStatus() == ConfigurationDiagnosticsSnapshot.Status.NOT_CONFIGURED ->
+            stringResource(R.string.settings_configuration_diagnostics_not_configured)
+        snapshot.getStatus() == ConfigurationDiagnosticsSnapshot.Status.FAILED ->
+            stringResource(R.string.settings_configuration_diagnostics_failed)
+        snapshot.getUnresolvedReferences().isEmpty() ->
+            stringResource(R.string.settings_configuration_diagnostics_ready)
+        else ->
+            stringResource(
+                R.string.settings_configuration_diagnostics_missing,
+                snapshot.getUnresolvedReferences().size,
+            )
+    }
+
+    SettingsItem(
+        title = stringResource(R.string.settings_configuration_diagnostics),
+        summary = summary,
+        confirmButton = { dismiss ->
+            MiuixActionButton(onClick = {
+                onRefresh()
+                dismiss()
+            }) {
+                Text(stringResource(R.string.settings_configuration_diagnostics_refresh))
+            }
+        },
+        content = {
+            if (refreshing) {
+                Text(
+                    text = stringResource(R.string.settings_configuration_diagnostics_checking),
+                    style = MiuixTheme.textStyles.body2,
+                )
+            } else {
+                ConfigurationDiagnosticsDetails(snapshot)
+            }
+        },
+    )
+}
+
+@Composable
+private fun ConfigurationDiagnosticsDetails(snapshot: ConfigurationDiagnosticsSnapshot) {
+    when (snapshot.getStatus()) {
+        ConfigurationDiagnosticsSnapshot.Status.NOT_CONFIGURED -> Text(
+            text = stringResource(R.string.settings_configuration_diagnostics_not_configured),
+            style = MiuixTheme.textStyles.body2,
+        )
+        ConfigurationDiagnosticsSnapshot.Status.FAILED -> Text(
+            text = stringResource(R.string.settings_configuration_diagnostics_failed),
+            style = MiuixTheme.textStyles.body2,
+        )
+        ConfigurationDiagnosticsSnapshot.Status.READY -> {
+            val references = snapshot.getUnresolvedReferences()
+            if (references.isEmpty()) {
+                Text(
+                    text = stringResource(R.string.settings_configuration_diagnostics_ready),
+                    style = MiuixTheme.textStyles.body2,
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp),
+                ) {
+                    items(references) { reference ->
+                        Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                            DiagnosticValue(
+                                label = stringResource(
+                                    R.string.settings_configuration_diagnostics_source,
+                                ),
+                                value = sanitizeDiagnosticValue(reference.getSourceName()),
+                            )
+                            DiagnosticValue(
+                                label = stringResource(
+                                    R.string.settings_configuration_diagnostics_owner,
+                                ),
+                                value = sanitizeDiagnosticValue(reference.getOwnerKey()),
+                            )
+                            DiagnosticValue(
+                                label = stringResource(
+                                    R.string.settings_configuration_diagnostics_reference,
+                                ),
+                                value = sanitizeDiagnosticValue(reference.getReference()),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DiagnosticValue(label: String, value: String) {
+    Text(
+        text = "$label: $value",
+        style = MiuixTheme.textStyles.body2,
+        color = MiuixTheme.colorScheme.onSurface,
+    )
+}
+
+/** Keep diagnostics safe and bounded even if a malformed config contains control characters. */
+private fun sanitizeDiagnosticValue(value: String, maxLength: Int = 240): String {
+    val sanitized = buildString {
+        value.forEach { character ->
+            append(if (character.isISOControl()) '\uFFFD' else character)
+        }
+    }
+    return if (sanitized.length <= maxLength) sanitized else sanitized.take(maxLength - 1) + '\u2026'
 }
 
 @Composable
