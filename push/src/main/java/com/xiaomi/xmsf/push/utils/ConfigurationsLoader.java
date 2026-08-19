@@ -423,11 +423,33 @@ public class ConfigurationsLoader {
                         referenceSites,
                 ConfigurationDiagnosticsSnapshot diagnosticsSnapshot) {
             this.version = version;
-            this.packageConfigs = Collections.unmodifiableMap(
-                    new HashMap<>(packageConfigs));
-            this.referenceSites = Collections.unmodifiableMap(
-                    new HashMap<>(referenceSites));
+            this.packageConfigs = immutableConfigMap(packageConfigs);
+            this.referenceSites = immutableReferenceMap(referenceSites);
             this.diagnosticsSnapshot = diagnosticsSnapshot;
+        }
+
+        private static Map<String, List<Object>> immutableConfigMap(
+                Map<String, List<Object>> source) {
+            Map<String, List<Object>> copy = new HashMap<>();
+            for (Map.Entry<String, List<Object>> entry : source.entrySet()) {
+                copy.put(entry.getKey(), Collections.unmodifiableList(
+                        new ArrayList<>(entry.getValue())));
+            }
+            return Collections.unmodifiableMap(copy);
+        }
+
+        private static Map<String, List<ConfigurationReferenceDiagnostics.UnresolvedReference>>
+        immutableReferenceMap(
+                Map<String, List<ConfigurationReferenceDiagnostics.UnresolvedReference>> source) {
+            Map<String, List<ConfigurationReferenceDiagnostics.UnresolvedReference>> copy =
+                    new HashMap<>();
+            for (Map.Entry<String,
+                    List<ConfigurationReferenceDiagnostics.UnresolvedReference>> entry
+                    : source.entrySet()) {
+                copy.put(entry.getKey(), Collections.unmodifiableList(
+                        new ArrayList<>(entry.getValue())));
+            }
+            return Collections.unmodifiableMap(copy);
         }
 
         private static PublishedConfigurationState notConfigured() {

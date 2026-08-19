@@ -90,6 +90,9 @@ public class ConfigurationDiagnosticsSnapshotTest {
                 snapshot.getUnresolvedReferences().get(0).getSourceName());
         assertTrue(loader.getConfigs().containsKey("consumer"));
         assertSame(snapshot.getUnresolvedReferences(), loader.getUnresolvedReferences());
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> loader.getConfigs().get("consumer").add("another-reference"));
     }
 
     @Test
