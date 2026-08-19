@@ -323,16 +323,22 @@ class ApplicationInfoPage : ComponentActivity() {
     private fun NotificationCategory(categoryName: String, channels: List<NotificationChannel>) {
         SettingsGroup(categoryName) {
             channels.forEach { channel ->
-                SettingsItem(
-                    title = AppConfigurationUtils.getNotificationTitle(
-                        channel
-                    ).toString(),
-                    summary = AppConfigurationUtils.getNotificationSummary(
-                        channel
-                    ),
-                    confirmButton = {},
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
                 ) {
-                    NotificationChannel(channel, appConfigurationUtils)
+                    SettingsItem(
+                        title = AppConfigurationUtils.getNotificationTitle(
+                            channel
+                        ).toString(),
+                        summary = AppConfigurationUtils.getNotificationSummary(
+                            channel
+                        ),
+                        confirmButton = {},
+                    ) {
+                        NotificationChannel(channel, appConfigurationUtils)
+                    }
                 }
             }
         }
@@ -340,12 +346,18 @@ class ApplicationInfoPage : ComponentActivity() {
 
     @Composable
     private fun ManageNotificationItem() {
-        SettingsItem(
-            title = stringResource(R.string.settings_manage_app_notifications),
-            summary = stringResource(R.string.settings_manage_app_notifications_summary),
-            enabled = applicationInfo.registeredType == RegisteredType.NotRegistered,
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
         ) {
-            appConfigurationUtils.gotoNotificationSettingPage()
+            SettingsItem(
+                title = stringResource(R.string.settings_manage_app_notifications),
+                summary = stringResource(R.string.settings_manage_app_notifications_summary),
+                enabled = applicationInfo.registeredType == RegisteredType.NotRegistered,
+            ) {
+                appConfigurationUtils.gotoNotificationSettingPage()
+            }
         }
     }
 
@@ -359,32 +371,38 @@ fun Tips(
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
 ) {
-    Row(modifier = Modifier.padding(10.dp)) {
-        Icon(
-            painterResource(R.drawable.ic_error_outline_black_24dp), null,
-            tint = Color(0xFFD50000)
-        )
-        Spacer(Modifier.width(10.dp))
-        Column {
-            Text(title, style = MiuixTheme.textStyles.body2)
-
-            MarkdownView(
-                description,
-                textSize = MiuixTheme.textStyles.footnote1.fontSize.value,
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Row(modifier = Modifier.padding(16.dp)) {
+            Icon(
+                painterResource(R.drawable.ic_error_outline_black_24dp), null,
+                tint = Color(0xFFD50000)
             )
-            if (actionDescription != null && actionLabel != null && onAction != null) {
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    text = actionDescription,
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text(title, style = MiuixTheme.textStyles.body2)
+
+                MarkdownView(
+                    description,
+                    textSize = MiuixTheme.textStyles.footnote1.fontSize.value,
                 )
-                Spacer(Modifier.height(10.dp))
-                Button(
-                    modifier = Modifier.align(Alignment.End),
-                    text = actionLabel,
-                    onClick = onAction,
-                )
+                if (actionDescription != null && actionLabel != null && onAction != null) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = actionDescription,
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Button(
+                        modifier = Modifier.align(Alignment.End),
+                        text = actionLabel,
+                        onClick = onAction,
+                    )
+                }
             }
         }
     }
