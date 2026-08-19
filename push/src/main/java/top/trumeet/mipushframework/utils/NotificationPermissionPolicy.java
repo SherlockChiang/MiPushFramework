@@ -20,6 +20,26 @@ public final class NotificationPermissionPolicy {
         BLOCKED
     }
 
+    /**
+     * Destination used when the user needs to repair notification access from settings.
+     *
+     * <p>This is deliberately a pure value so the Android intent construction and launch
+     * fallback can be tested without creating an Android {@code Context}.</p>
+     */
+    public enum SettingsRoute {
+        APP_NOTIFICATION_SETTINGS,
+        APPLICATION_DETAILS_SETTINGS
+    }
+
+    /**
+     * Selects the most specific settings destination available on the device.
+     */
+    public static SettingsRoute chooseSettingsRoute(boolean notificationSettingsResolvable) {
+        return notificationSettingsResolvable
+                ? SettingsRoute.APP_NOTIFICATION_SETTINGS
+                : SettingsRoute.APPLICATION_DETAILS_SETTINGS;
+    }
+
     public static Status evaluate(
             int sdkInt,
             boolean granted,

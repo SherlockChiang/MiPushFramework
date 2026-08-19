@@ -2,6 +2,7 @@ package top.trumeet.mipushframework.utils;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -45,11 +46,56 @@ public final class NotificationPermissionController {
     }
 
     public static void openNotificationSettings(@NonNull Context context) {
-        Intent intent = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                .putExtra(Settings.EXTRA_APP_PACKAGE, context.getPackageName())
-                .setData(Uri.parse("package:" + context.getPackageName()))
+        String packageName = context.getPackageName();
+        Intent notificationSettings = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        context.startActivity(intent);
+        Intent applicationDetails = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(Uri.parse("package:" + packageName))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+        PackageManager packageManager;
+        try {
+            packageManager = context.getPackageManager();
+        } catch (SecurityException ignored) {
+            return;
+        }
+
+        boolean notificationSettingsResolvable;
+        try {
+            notificationSettingsResolvable = notificationSettings.resolveActivity(packageManager) != null;
+        } catch (SecurityException ignored) {
+            notificationSettingsResolvable = false;
+        }
+
+        Intent preferred = NotificationPermissionPolicy.chooseSettingsRoute(notificationSettingsResolvable)
+                == NotificationPermissionPolicy.SettingsRoute.APP_NOTIFICATION_SETTINGS
+                ? notificationSettings
+                : applicationDetails;
+        if (tryStartActivity(context, packageManager, preferred)) {
+            return;
+        }
+
+        // HyperOS variants can report a resolver and still reject the launch. Keep a
+        // package-details fallback so tapping the row can never crash or strand the user.
+        if (preferred != applicationDetails) {
+            tryStartActivity(context, packageManager, applicationDetails);
+        }
+    }
+
+    private static boolean tryStartActivity(
+            @NonNull Context context,
+            @NonNull PackageManager packageManager,
+            @NonNull Intent intent) {
+        try {
+            if (intent.resolveActivity(packageManager) == null) {
+                return false;
+            }
+            context.startActivity(intent);
+            return true;
+        } catch (ActivityNotFoundException | SecurityException ignored) {
+            return false;
+        }
     }
 
     @NonNull

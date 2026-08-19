@@ -39,4 +39,16 @@ public class NotificationPermissionPolicyTest {
         assertEquals(NotificationPermissionPolicy.Status.BLOCKED, blocked);
         assertFalse(NotificationPermissionPolicy.shouldAutoRequest(blocked));
     }
+
+    @Test
+    public void settingsRoutePrefersPerAppNotificationSettingsWhenResolvable() {
+        assertEquals(NotificationPermissionPolicy.SettingsRoute.APP_NOTIFICATION_SETTINGS,
+                NotificationPermissionPolicy.chooseSettingsRoute(true));
+    }
+
+    @Test
+    public void settingsRouteFallsBackToApplicationDetailsWhenUnavailable() {
+        assertEquals(NotificationPermissionPolicy.SettingsRoute.APPLICATION_DETAILS_SETTINGS,
+                NotificationPermissionPolicy.chooseSettingsRoute(false));
+    }
 }
