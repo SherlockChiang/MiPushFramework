@@ -64,7 +64,7 @@ public final class NotificationPermissionController {
         boolean notificationSettingsResolvable;
         try {
             notificationSettingsResolvable = notificationSettings.resolveActivity(packageManager) != null;
-        } catch (SecurityException ignored) {
+        } catch (ActivityNotFoundException | SecurityException ignored) {
             notificationSettingsResolvable = false;
         }
 
