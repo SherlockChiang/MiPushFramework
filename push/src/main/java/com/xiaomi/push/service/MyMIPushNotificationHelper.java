@@ -806,7 +806,9 @@ public class MyMIPushNotificationHelper {
 
         if (intent != null) {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            if (context.getPackageManager().resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
+            ResolveInfo resolvedActivity = context.getPackageManager()
+                    .resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY);
+            if (isResolvedActivityInTargetPackage(pkgName, resolvedActivity)) {
                 //TODO fixit
 
                 //we don't have RegSecret we cannot decode push action
@@ -820,6 +822,19 @@ public class MyMIPushNotificationHelper {
         }
 
         return null;
+    }
+
+    /**
+     * Ensures a click Activity resolved from push metadata cannot escape the
+     * package that owns the notification. A null/empty target or incomplete
+     * resolution is rejected using the safe service-pending-intent fallback.
+     */
+    static boolean isResolvedActivityInTargetPackage(String targetPackage, ResolveInfo resolveInfo) {
+        return targetPackage != null
+                && !targetPackage.isEmpty()
+                && resolveInfo != null
+                && resolveInfo.activityInfo != null
+                && targetPackage.equals(resolveInfo.activityInfo.packageName);
     }
 
     /**

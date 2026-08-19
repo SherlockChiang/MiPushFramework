@@ -6,6 +6,9 @@ import static org.junit.Assert.assertTrue;
 
 import com.elvishew.xlog.XLog;
 
+import android.content.pm.ActivityInfo;
+import android.content.pm.ResolveInfo;
+
 import org.junit.Before;
 import org.junit.Test;
 
@@ -62,5 +65,27 @@ public class NotificationExecutorTest {
         assertEquals("notification_colorful_button_intent_uri", keys.intentUri);
         assertEquals("notification_colorful_button_intent_class", keys.intentClass);
         assertEquals("notification_colorful_button_web_uri", keys.webUri);
+    }
+
+    @Test
+    public void resolvedActivityMustBelongToTargetPackage() {
+        ResolveInfo resolved = new ResolveInfo();
+        resolved.activityInfo = new ActivityInfo();
+        resolved.activityInfo.packageName = "com.example.target";
+
+        assertTrue(MyMIPushNotificationHelper.isResolvedActivityInTargetPackage(
+                "com.example.target", resolved));
+        assertTrue(!MyMIPushNotificationHelper.isResolvedActivityInTargetPackage(
+                "com.example.other", resolved));
+        assertTrue(!MyMIPushNotificationHelper.isResolvedActivityInTargetPackage(
+                "com.example.target", null));
+
+        ResolveInfo withoutActivity = new ResolveInfo();
+        assertTrue(!MyMIPushNotificationHelper.isResolvedActivityInTargetPackage(
+                "com.example.target", withoutActivity));
+        assertTrue(!MyMIPushNotificationHelper.isResolvedActivityInTargetPackage(
+                null, resolved));
+        assertTrue(!MyMIPushNotificationHelper.isResolvedActivityInTargetPackage(
+                "", resolved));
     }
 }
