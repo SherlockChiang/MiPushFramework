@@ -53,7 +53,6 @@ import com.xiaomi.xmsf.push.notification.FocusNotificationSafety;
 import com.xiaomi.xmsf.push.notification.NotificationController;
 import com.xiaomi.xmsf.push.utils.Configurations;
 import com.xiaomi.xmsf.push.utils.IconConfigurations;
-import com.xiaomi.xmsf.push.utils.PackageConfig;
 import com.xiaomi.xmsf.utils.ConfigCenter;
 
 import java.net.MalformedURLException;
@@ -183,27 +182,29 @@ public class MyMIPushNotificationHelper {
 
     private static void handleNotificationByConfigurations(Context context, byte[] decryptedContent, String packageName, XmPushActionContainer container) {
         Context appContext = context.getApplicationContext() != null ? context.getApplicationContext() : context;
+        Set<String> operations = null;
         try {
-            Set<String> operations = Configurations.getInstance().handle(packageName, container);
+            operations = Configurations.getInstance().handle(packageName, container);
+        } catch (Exception e) {
+            logger.e(e.getLocalizedMessage(), e);
+        }
 
-            if (operations.contains(PackageConfig.OPERATION_WAKE)) {
-                wakeScreen(appContext, packageName);
-            }
-            if (!operations.contains(PackageConfig.OPERATION_IGNORE)) {
-                executorService.execute(() -> {
+        NotificationDispatchPipeline.DispatchPlan plan =
+                NotificationDispatchPipeline.planFromOperations(operations);
+        NotificationDispatchPipeline.dispatch(
+                plan,
+                () -> wakeScreen(appContext, packageName),
+                () -> executorService.execute(() -> {
                     try {
                         doNotifyPushMessage(appContext, container, decryptedContent);
                     } catch (Exception e) {
                         logger.e(e.getLocalizedMessage(), e);
                     }
-                });
-            }
-            if (operations.contains(PackageConfig.OPERATION_OPEN)) {
-                MyPushMessageHandler.startService(appContext, container, decryptedContent);
-            }
-        } catch (Exception e) {
-            logger.e(e.getLocalizedMessage(), e);
-        }
+                }),
+                () -> MyPushMessageHandler.startService(appContext, container, decryptedContent),
+                (stage, exception) -> logger.e(
+                        "Notification dispatch stage failed: " + stage,
+                        exception));
     }
 
     private static void loadConfigurationsOnce(Context context) {
