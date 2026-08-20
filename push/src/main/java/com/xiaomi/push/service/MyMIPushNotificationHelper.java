@@ -25,6 +25,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.PowerManager;
 import android.os.Process;
+import android.os.SystemClock;
 import android.service.notification.StatusBarNotification;
 import android.text.TextUtils;
 import android.widget.Toast;
@@ -138,6 +139,15 @@ public class MyMIPushNotificationHelper {
             new java.util.concurrent.atomic.AtomicInteger(1);
     private static final java.util.concurrent.ThreadPoolExecutor executorService = createNotificationExecutor();
 
+    /**
+     * Explicit wake operations are optional side effects.  Keep a short
+     * per-package gate so bursty pushes cannot repeatedly reacquire a
+     * screen-bright wake lock, while notification publication continues
+     * independently in the dispatch pipeline.
+     */
+    private static final WakeScreenThrottle WAKE_SCREEN_THROTTLE =
+            new WakeScreenThrottle(SystemClock::elapsedRealtime);
+
     public static java.util.concurrent.ThreadPoolExecutor getNotificationExecutor() {
         return executorService;
     }
@@ -231,6 +241,9 @@ public class MyMIPushNotificationHelper {
     private static void wakeScreen(Context context, String sourcePackage) {
         PowerManager powerManager = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
         if (powerManager == null || powerManager.isInteractive()) {
+            return;
+        }
+        if (!WAKE_SCREEN_THROTTLE.tryAcquire(sourcePackage)) {
             return;
         }
         PowerManager.WakeLock fullWakeLock = powerManager.newWakeLock((
