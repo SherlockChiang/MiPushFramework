@@ -181,7 +181,14 @@ Please grant the <b>Run in the background or wake up</b> permissions.
     <string name="action_edit_permission_title">Edit Permissions (Save by ----></string>
     <string name="action_app_info">App Info</string>
     <string name="action_notify">send notification</string>
+    <string name="action_replay_notification">Show again</string>
     <string name="action_configurate">run configuration</string>
+    <string name="event_replay_ready">Ready to show this notification again.</string>
+    <string name="event_replay_dispatched">Notification replay requested.</string>
+    <string name="event_replay_service_unavailable">Push service is not running. Start it and try again.</string>
+    <string name="event_replay_invalid_payload">This record has no valid notification payload.</string>
+    <string name="event_replay_unsupported">Only notification records can be shown again.</string>
+    <string name="event_replay_failed">Could not replay this notification.</string>
 
     <!-- Permission -->
     <string name="permissions">Permissions</string>

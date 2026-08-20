@@ -131,6 +131,15 @@ private fun EventDetailsDialog(
     val targetHeight = screenHeight * 0.9f
 
     val show = remember(clickedEvent.id) { mutableStateOf(true) }
+    var replayStatus by remember(clickedEvent.id) {
+        mutableStateOf<EventListPageUtils.ReplayStatus?>(null)
+    }
+    // The service may start or stop while this dialog is open, so only gate the button on the
+    // immutable record shape here.  replayEvent() performs the live service check at click time.
+    val canReplay = remember(clickedEvent.id) {
+        EventListPageUtils.getReplayStatus(clickedEvent.event, true) ==
+            EventListPageUtils.ReplayStatus.READY
+    }
     MiuixDialog(
         title = "Developer Info",
         show = show,
@@ -142,15 +151,31 @@ private fun EventDetailsDialog(
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                MiuixActionButton(
+                    modifier = Modifier.weight(1f),
+                    enabled = canReplay,
+                    onClick = {
+                        replayStatus = EventListPageUtils.replayEvent(clickedEvent.event)
+                    },
+                ) { Text(stringResource(R.string.action_replay_notification)) }
                 MiuixActionButton(onClick = {
                     EventListPageUtils.startManagePermissions(
                         context,
                         clickedEvent.packageName
                     )
-                }) { Text(stringResource(R.string.action_app_info)) }
+                }) {
+                    Text(stringResource(R.string.action_app_info))
+                }
+            }
+            replayStatus?.let { status ->
+                Text(
+                    text = stringResource(replayStatusMessage(status)),
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
             }
             TextView(json)
             Row(
@@ -168,17 +193,18 @@ private fun EventDetailsDialog(
                 MiuixActionButton(onClick = {
                     EventListPageUtils.copyToClipboard(context, json)
                 }) { Text(stringResource(android.R.string.copy)) }
-
-                MiuixActionButton(onClick = {
-                    EventListPageUtils.mockMessage(
-                        RegSecUtils.getContainerWithRegSec(
-                            clickedEvent.event
-                        )
-                    )
-                }) { Text(stringResource(R.string.action_notify)) }
             }
         }
     }
+}
+
+private fun replayStatusMessage(status: EventListPageUtils.ReplayStatus): Int = when (status) {
+    EventListPageUtils.ReplayStatus.DISPATCHED -> R.string.event_replay_dispatched
+    EventListPageUtils.ReplayStatus.SERVICE_UNAVAILABLE -> R.string.event_replay_service_unavailable
+    EventListPageUtils.ReplayStatus.INVALID_PAYLOAD -> R.string.event_replay_invalid_payload
+    EventListPageUtils.ReplayStatus.UNSUPPORTED_EVENT -> R.string.event_replay_unsupported
+    EventListPageUtils.ReplayStatus.FAILED -> R.string.event_replay_failed
+    EventListPageUtils.ReplayStatus.READY -> R.string.event_replay_ready
 }
 
 private val g_items = mutableStateListOf<EventInfoForDisplay>()

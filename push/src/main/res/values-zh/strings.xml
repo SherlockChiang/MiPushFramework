@@ -163,6 +163,13 @@
     <!-- For Just format -->
     <string name="action_edit_permission_title">修改权限（保存 ----></string>
     <string name="action_app_info">应用信息</string>
+    <string name="action_replay_notification">手动弹出通知</string>
+    <string name="event_replay_ready">可以再次弹出这条通知。</string>
+    <string name="event_replay_dispatched">已请求再次弹出通知。</string>
+    <string name="event_replay_service_unavailable">推送服务未运行，请启动服务后重试。</string>
+    <string name="event_replay_invalid_payload">这条记录没有有效的通知内容。</string>
+    <string name="event_replay_unsupported">只有通知记录可以再次弹出。</string>
+    <string name="event_replay_failed">通知再次弹出失败。</string>
     <!-- For Long ago format -->
     <string name="permissions">权限</string>
 

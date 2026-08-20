@@ -22,6 +22,7 @@ import com.xiaomi.xmsf.push.notification.NotificationController;
 import com.xiaomi.xmsf.push.utils.Configurations;
 import com.xiaomi.xmsf.push.utils.RegSecUtils;
 import com.xiaomi.xmsf.utils.ConvertUtils;
+import com.xiaomi.push.service.XMPushService;
 
 import org.apache.thrift.TBase;
 
@@ -37,6 +38,27 @@ import top.trumeet.mipushframework.main.ApplicationInfoPage;
 
 public class EventListPageUtils {
     private final Context context;
+
+    /**
+     * Result of the explicit replay action exposed from an event's detail dialog.
+     *
+     * <p>Keeping this result separate from the notification pipeline is intentional: replay is a
+     * user initiated diagnostic action and must never alter the normal receive/notify path.</p>
+     */
+    public enum ReplayStatus {
+        /** The event is not a notification (for example, a registration or command record). */
+        UNSUPPORTED_EVENT,
+        /** The record has no payload, or its payload cannot be decoded. */
+        INVALID_PAYLOAD,
+        /** The push service is not alive, so there is no safe dispatcher to invoke. */
+        SERVICE_UNAVAILABLE,
+        /** The record passed pre-flight checks and can be replayed. */
+        READY,
+        /** The replay request was handed to the push message processor. */
+        DISPATCHED,
+        /** The processor rejected the replay request synchronously. */
+        FAILED,
+    }
 
     public EventListPageUtils(Context context) {
         this.context = context;
@@ -76,6 +98,64 @@ public class EventListPageUtils {
     public static void mockMessage(XmPushActionContainer containerWithRegSec) {
         MockMIPushMessage.mockProcessMIPushMessage(
                 XMPushServiceAbility.xmPushService, containerWithRegSec.deepCopy());
+    }
+
+    /**
+     * Returns whether an event represents a message that can be shown again as a notification.
+     * Registration, command and diagnostic records deliberately remain display-only.
+     */
+    public static boolean isReplayableEvent(@Nullable Event event) {
+        if (event == null) {
+            return false;
+        }
+        return event.getType() == Event.Type.SendMessage
+                || event.getType() == Event.Type.Notification;
+    }
+
+    /**
+     * Pure pre-flight check used by the UI and unit tests.  The service argument is supplied by
+     * the caller so this method remains deterministic and does not read process-global state.
+     */
+    public static @NonNull ReplayStatus getReplayStatus(
+            @Nullable Event event, boolean serviceAvailable) {
+        if (!isReplayableEvent(event)) {
+            return ReplayStatus.UNSUPPORTED_EVENT;
+        }
+        if (event.getPayload() == null || event.getPayload().length == 0) {
+            return ReplayStatus.INVALID_PAYLOAD;
+        }
+        if (!serviceAvailable) {
+            return ReplayStatus.SERVICE_UNAVAILABLE;
+        }
+        return ReplayStatus.READY;
+    }
+
+    /**
+     * Replays one stored notification through the existing mock-message entry point.
+     *
+     * <p>This method is intentionally defensive because records from older database schemas may
+     * contain a missing or malformed payload, and the service can stop while the dialog is open.
+     * A failed replay is reported to the caller instead of crashing the Compose page.</p>
+     */
+    public static @NonNull ReplayStatus replayEvent(@Nullable Event event) {
+        XMPushService service = XMPushServiceAbility.xmPushService;
+        ReplayStatus preflight = getReplayStatus(event, service != null);
+        if (preflight != ReplayStatus.READY) {
+            return preflight;
+        }
+
+        try {
+            XmPushActionContainer container = RegSecUtils.getContainerWithRegSec(event);
+            if (container == null) {
+                return ReplayStatus.INVALID_PAYLOAD;
+            }
+            MockMIPushMessage.mockProcessMIPushMessage(service, container.deepCopy());
+            return ReplayStatus.DISPATCHED;
+        } catch (Throwable ignored) {
+            // Replay is an optional diagnostic action.  Never let a decoder or service race take
+            // down the event details dialog.
+            return ReplayStatus.FAILED;
+        }
     }
 
     public static @NonNull String getContent(Event event, XmPushActionContainer containerWithRegSec) {
