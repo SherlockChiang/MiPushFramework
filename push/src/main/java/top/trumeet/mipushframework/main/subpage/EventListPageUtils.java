@@ -3,6 +3,7 @@ package top.trumeet.mipushframework.main.subpage;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.text.TextUtils;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -213,7 +214,9 @@ public class EventListPageUtils {
     }
 
     public static void startManagePermissions(Context context, String packageName, boolean IGNORE_NOT_REGISTERED) {
-        // Issue: This currently allows overlapping opens.
+        if (context == null || TextUtils.isEmpty(packageName)) {
+            return;
+        }
         Intent intent = new Intent(context, ApplicationInfoPage.class)
                 .putExtra(ApplicationInfoPage.EXTRA_PACKAGE_NAME, packageName);
         if (IGNORE_NOT_REGISTERED) {

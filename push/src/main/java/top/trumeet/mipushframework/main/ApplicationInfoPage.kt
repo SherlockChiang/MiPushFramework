@@ -93,7 +93,15 @@ class ApplicationInfoPage : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        init(getRegisteredApplication()!!)
+        val registeredApplication = getRegisteredApplication()
+        if (registeredApplication == null) {
+            // A stale event may refer to a package that has already been unregistered or
+            // removed.  Finishing this entry point is safer than dereferencing a null record and
+            // gives callers a predictable no-crash result.
+            finish()
+            return
+        }
+        init(registeredApplication)
         setContent {
             Theme {
                 window.navigationBarColor = MiuixTheme.colorScheme.surfaceContainer.toArgb()

@@ -43,10 +43,10 @@ import top.trumeet.common.utils.Utils
 import top.trumeet.mipush.provider.entities.Event
 import top.trumeet.mipush.provider.event.type.TypeFactory
 import top.trumeet.mipushframework.component.AppIcon
-import top.trumeet.mipushframework.component.MiuixActionButton
 import top.trumeet.mipushframework.component.MiuixDialog
 import top.trumeet.mipushframework.component.RefreshableLazyColumn
 import top.trumeet.mipushframework.component.TextView
+import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -154,21 +154,28 @@ private fun EventDetailsDialog(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                MiuixActionButton(
+                Button(
                     modifier = Modifier.weight(1f),
+                    text = stringResource(R.string.action_replay_notification),
                     enabled = canReplay,
                     onClick = {
                         replayStatus = EventListPageUtils.replayEvent(clickedEvent.event)
                     },
-                ) { Text(stringResource(R.string.action_replay_notification)) }
-                MiuixActionButton(onClick = {
-                    EventListPageUtils.startManagePermissions(
-                        context,
-                        clickedEvent.packageName
-                    )
-                }) {
-                    Text(stringResource(R.string.action_app_info))
-                }
+                )
+                Button(
+                    modifier = Modifier.weight(1f),
+                    text = stringResource(R.string.action_app_info),
+                    onClick = {
+                        // A notification can arrive before its registration row is persisted.
+                        // Open the same Miuix permission page in that case and let it offer the
+                        // registration action instead of crashing on a missing database record.
+                        EventListPageUtils.startManagePermissions(
+                            context,
+                            clickedEvent.packageName,
+                            true,
+                        )
+                    },
+                )
             }
             replayStatus?.let { status ->
                 Text(
@@ -180,19 +187,24 @@ private fun EventDetailsDialog(
             TextView(json)
             Row(
                 Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                MiuixActionButton(onClick = {
-                    json =
-                        EventListPageUtils.getContent(
+                Button(
+                    modifier = Modifier.weight(1f),
+                    text = stringResource(R.string.action_configurate),
+                    onClick = {
+                        json = EventListPageUtils.getContent(
                             clickedEvent.event,
                             RegSecUtils.getContainerWithRegSec(clickedEvent.event)
                         )
-                }) { Text(stringResource(R.string.action_configurate)) }
+                    },
+                )
 
-                MiuixActionButton(onClick = {
-                    EventListPageUtils.copyToClipboard(context, json)
-                }) { Text(stringResource(android.R.string.copy)) }
+                Button(
+                    modifier = Modifier.weight(1f),
+                    text = stringResource(android.R.string.copy),
+                    onClick = { EventListPageUtils.copyToClipboard(context, json) },
+                )
             }
         }
     }
