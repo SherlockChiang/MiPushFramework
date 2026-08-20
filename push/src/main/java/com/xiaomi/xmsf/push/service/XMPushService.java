@@ -1,17 +1,15 @@
 package com.xiaomi.xmsf.push.service;
 
 import android.app.IntentService;
-import android.content.ComponentName;
 import android.content.Intent;
 import android.widget.Toast;
-
-import androidx.core.content.ContextCompat;
 
 import com.elvishew.xlog.Logger;
 import com.elvishew.xlog.XLog;
 import com.nihility.Global;
 import com.xiaomi.xmsf.R;
 import com.xiaomi.xmsf.push.control.PushControllerUtils;
+import com.xiaomi.xmsf.push.control.PushServiceDispatcher;
 import com.xiaomi.xmsf.push.utils.Configurations;
 import com.xiaomi.xmsf.utils.ConvertUtils;
 
@@ -47,11 +45,7 @@ public class XMPushService extends IntentService {
     }
 
     private void forwardToPushServiceMain(Intent intent) {
-        Intent intent2 = new Intent();
-        intent2.setComponent(new ComponentName(this, com.xiaomi.push.service.XMPushService.class));
-        intent2.setAction(intent.getAction());
-        intent2.putExtras(intent);
-        ContextCompat.startForegroundService(this, intent2);
+        PushServiceDispatcher.dispatchIntent(this, intent, true);
         logger.d("forward intent " + ConvertUtils.toJson(intent));
     }
 

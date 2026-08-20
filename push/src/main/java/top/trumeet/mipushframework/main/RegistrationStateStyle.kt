@@ -12,9 +12,21 @@ object RegistrationStateStyle {
     val YellowColor = Color(0xffff9800)
 
     fun contentOf(app: RegisteredApplication, context: Context): Pair<String, Color> {
-        val prefix =
-            if (!app.existServices) context.getString(R.string.mipush_services_not_found) + " - "
-            else ""
+        // Keep rows created by older callers compatible with the legacy boolean field.  New
+        // loaders publish the explicit tri-state, while getServiceProbeState() maps a legacy
+        // `existServices = true` to PRESENT without persisting probe metadata.
+        val probeState = app.getServiceProbeState()
+        // A registered event is authoritative.  Some ROMs hide or protect the target SDK
+        // service from package discovery even though the app is already registered; prefixing
+        // that row with "services not found" incorrectly downgrades a successful registration.
+        val prefix = when {
+            app.registeredType == RegisteredApplication.RegisteredType.Registered -> ""
+            shouldShowMissingServices(app.registeredType, probeState) ->
+                context.getString(R.string.mipush_services_not_found) + " - "
+            probeState == RegisteredApplication.ServiceProbeState.UNKNOWN ->
+                context.getString(R.string.mipush_services_unknown) + " - "
+            else -> ""
+        }
         val color = colorOf(app)
         return when (app.registeredType) {
             RegisteredApplication.RegisteredType.Registered -> {
@@ -33,20 +45,44 @@ object RegistrationStateStyle {
     }
 
     fun colorOf(app: RegisteredApplication): Color {
-        return if (!app.existServices) ErrorColor
-        else when (app.registeredType) {
+        val probeState = app.getServiceProbeState()
+        return when (app.registeredType) {
             RegisteredApplication.RegisteredType.Registered -> {
                 GreenColor
             }
 
             RegisteredApplication.RegisteredType.Unregistered -> {
-                YellowColor
+                when (probeState) {
+                    RegisteredApplication.ServiceProbeState.MISSING -> ErrorColor
+                    RegisteredApplication.ServiceProbeState.UNKNOWN -> YellowColor
+                    RegisteredApplication.ServiceProbeState.PRESENT -> YellowColor
+                }
             }
 
 //      RegisteredApplication.RegisteredType.NotRegistered
             else -> {
-                Color.Unspecified
+                when (probeState) {
+                    RegisteredApplication.ServiceProbeState.MISSING -> ErrorColor
+                    RegisteredApplication.ServiceProbeState.UNKNOWN -> YellowColor
+                    RegisteredApplication.ServiceProbeState.PRESENT -> Color.Unspecified
+                }
             }
         }
     }
+
+    /** Missing-service diagnostics apply only to rows that are not already registered. */
+    fun shouldShowMissingServices(registeredType: Int, existServices: Boolean): Boolean =
+        shouldShowMissingServices(
+            registeredType,
+            if (existServices) RegisteredApplication.ServiceProbeState.PRESENT
+            else RegisteredApplication.ServiceProbeState.MISSING,
+        )
+
+    /** Only a completed probe can assert that required services are missing. */
+    fun shouldShowMissingServices(
+        registeredType: Int,
+        serviceProbeState: RegisteredApplication.ServiceProbeState,
+    ): Boolean =
+        serviceProbeState == RegisteredApplication.ServiceProbeState.MISSING &&
+            registeredType != RegisteredApplication.RegisteredType.Registered
 }

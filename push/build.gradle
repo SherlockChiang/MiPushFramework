@@ -1,8 +1,7 @@
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
-apply plugin: 'io.github.wurensen.android-aspectjx'
+apply plugin: 'org.jetbrains.kotlin.plugin.compose'
 apply plugin: 'org.greenrobot.greendao'
-
 
 android {
     compileSdkVersion rootProject.ext.compileSdkVersion
@@ -28,59 +27,19 @@ android {
         }
 
         buildConfigField "String", "GIT_TAG", "\"" + rootProject.ext.gitTag + "\""
+        manifestPlaceholders = [
+                mipushReceivePermission: "com.xiaomi.xmsf.permission.MIPUSH_RECEIVE"
+        ]
     }
-
-    buildTypes {
-        debug {
-            signingConfig signingConfigs.debug
-        }
-        release {
-            signingConfig signingConfigs.debug
-            minifyEnabled false
-            //shrinkResources true
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-        }
-    }
-    testOptions {
-        unitTests.all {
-            jvmArgs '-noverify'
-        }
-    }
-
-    flavorDimensions = ["version"]
-    productFlavors {
-        normal {
-            dimension "version"
-        }
-        vc105 {
-            dimension "version"
-            versionCode = 105
-        }
-        prebuilt {
-            dimension "version"
-        }
-    }
-    androidComponents {
-        onVariants(selector().all()) { variant ->
-            if(variant.name.startsWith("prebuilt")) {
-                variant.androidResources.noCompress.add('dex')
-            }
-        }
-    }
-
-    aspectjx {
-        enabled = false
-    }
-
-    greendao {
-        // Must upgrade version code!
-        schemaVersion 17
-        daoPackage 'top.trumeet.mipush.provider.gen.db'
-    }
-    namespace 'top.trumeet.mipush.provider'
 
     signingConfigs {
         debug {
+            v1SigningEnabled true
+            v2SigningEnabled true
+            enableV3Signing = true
+            enableV4Signing = true
+        }
+        nihility {
             v1SigningEnabled true
             v2SigningEnabled true
             enableV3Signing = true
@@ -93,37 +52,110 @@ android {
             if (project.rootProject.file('local.properties').exists()) {
                 Properties properties = new Properties()
                 properties.load(project.rootProject.file('local.properties').newDataInputStream())
-                locale = properties.getProperty("KEY_LOCATE")
-                keystorePwd = properties.getProperty("KEYSTORE_PASSWORD")
-                alias = properties.getProperty("KEYSTORE_ALIAS")
-                pwd = properties.getProperty("KEY_PASSWORD")
+                if (properties.getProperty("KEY_LOCATE") != null) {
+                    locale = properties.getProperty("KEY_LOCATE")
+                }
+                if (properties.getProperty("KEYSTORE_PASSWORD") != null) {
+                    keystorePwd = properties.getProperty("KEYSTORE_PASSWORD")
+                }
+                if (properties.getProperty("KEYSTORE_ALIAS") != null) {
+                    alias = properties.getProperty("KEYSTORE_ALIAS")
+                }
+                if (properties.getProperty("KEY_PASSWORD") != null) {
+                    pwd = properties.getProperty("KEY_PASSWORD")
+                }
             }
 
             if (locale != null) {
-                storeFile file(locale)
-                storePassword keystorePwd
-                keyAlias alias
-                keyPassword pwd
+                def keyFile = file(locale)
+                if (keyFile.exists()) {
+                    storeFile keyFile
+                    storePassword keystorePwd
+                    keyAlias alias
+                    keyPassword pwd
+                }
             }
         }
     }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
+        release {
+            debuggable false
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+    testOptions {
+        unitTests.all {
+            jvmArgs '-noverify', '-Dnet.bytebuddy.experimental=true'
+        }
+    }
+
+    flavorDimensions = ["version"]
+    productFlavors {
+        normal {
+            dimension "version"
+            targetSdkVersion 34
+            versionCode 1003003001
+            signingConfig signingConfigs.nihility
+        }
+        vc105 {
+            dimension "version"
+            versionCode = 105
+            targetSdkVersion rootProject.ext.targetSdkVersion
+            signingConfig signingConfigs.nihility
+        }
+        prebuilt {
+            dimension "version"
+            targetSdkVersion rootProject.ext.targetSdkVersion
+            signingConfig signingConfigs.nihility
+        }
+    }
+    androidComponents {
+        onVariants(selector().all()) { variant ->
+            if(variant.name.startsWith("prebuilt")) {
+                variant.androidResources.noCompress.add('dex')
+            }
+        }
+    }
+
+    greendao {
+        // Must upgrade version code!
+        schemaVersion 17
+        daoPackage 'top.trumeet.mipush.provider.gen.db'
+    }
+    namespace 'top.trumeet.mipush.provider'
+
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+    kotlinOptions {
+        jvmTarget = '11'
     }
     lintOptions {
         checkReleaseBuilds false
-        // Or, if you prefer, you can continue to check for errors in release builds,
-        // but continue the build even when errors are found:
         abortOnError false
     }
 
 
     buildFeatures {
         compose true
+        buildConfig true
+    }
+    packagingOptions {
+        jniLibs {
+            // AGP 8.2 cannot page-align uncompressed JNI payloads for 16 KiB devices.
+            // Compressing them lets PackageManager extract them with the platform's
+            // native-library alignment and removes Android 15/16's compatibility dialog.
+            useLegacyPackaging true
+        }
     }
     composeOptions {
-        kotlinCompilerExtensionVersion "1.4.0"
+        // Kotlin 2.x uses the Compose compiler Gradle plugin.
     }
     namespace 'com.xiaomi.xmsf'
 }
@@ -136,12 +168,27 @@ android.applicationVariants.all { variant ->
     variant.getProcessJavaResourcesProvider().get().dependsOn(taskName)
 }
 
+gradle.taskGraph.whenReady { taskGraph ->
+    boolean requiresNihilityKey = taskGraph.allTasks.any { task ->
+        String name = task.name.toLowerCase()
+        (name.contains("normalrelease") || name.contains("vc105release")) &&
+                (name.startsWith("assemble") || name.startsWith("package") || name.startsWith("sign"))
+    }
+    if (requiresNihilityKey) {
+        def nihilityStore = android.signingConfigs.nihility.storeFile
+        if (nihilityStore == null || !nihilityStore.exists()) {
+            throw new GradleException("Official Nihility signing key (.yuuta.jks / KEY_LOCATE) is missing. Release build cannot proceed.")
+        }
+    }
+}
+
 dependencies {
 // modules {
     implementation project(':common')
     implementation project(':condom')
     implementation project(':mipush_hook')
     compileOnly files(project(':mipush_hook').ext.mipushLib)
+    implementation 'org.aspectj:aspectjrt:1.9.22.1'
 // }
 
 // feature dependencies {
@@ -165,6 +212,10 @@ dependencies {
 
 // Test {
     testImplementation 'junit:junit:4.13.2'
+    // Android's mockable android.jar exposes org.json methods as throwing stubs in
+    // local JVM tests. Use the platform-compatible JSON implementation for parser
+    // tests; this remains test-only and is never packaged into the APK.
+    testImplementation 'org.json:json:20180813'
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.6.1'
     androidTestImplementation("org.mockito:mockito-android:4.11.0")
@@ -179,10 +230,15 @@ dependencies {
     implementation 'androidx.palette:palette:1.0.0'
 
 
-    implementation "androidx.compose.ui:ui:1.4.0"
-    implementation "androidx.compose.material3:material3:1.0.0"
-    implementation "androidx.compose.ui:ui-tooling-preview:1.4.0"
-    implementation "androidx.compose.ui:ui-tooling:1.4.0"
+    implementation "androidx.compose.ui:ui:1.7.0"
+    // Keep Material 3 available as the compatibility layer for capabilities that Miuix 0.2.9
+    // does not expose, while page structure and primary controls use the Miuix components.
+    implementation "androidx.compose.foundation:foundation:1.7.1"
+    implementation "androidx.compose.material3:material3:1.3.0"
+    implementation "androidx.compose.material:material-icons-core:1.7.1"
+    implementation "top.yukonga.miuix.kmp:miuix-android:0.2.9"
+    implementation "androidx.compose.ui:ui-tooling-preview:1.7.0"
+    implementation "androidx.compose.ui:ui-tooling:1.7.0"
     implementation "androidx.lifecycle:lifecycle-runtime-ktx:2.6.1"
     implementation "androidx.activity:activity-compose:1.7.0"
     implementation 'androidx.navigation:navigation-compose:2.6.0'

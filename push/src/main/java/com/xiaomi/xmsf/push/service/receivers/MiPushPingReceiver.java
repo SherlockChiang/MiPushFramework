@@ -5,12 +5,11 @@ import android.content.Context;
 import android.content.Intent;
 import android.text.TextUtils;
 
-import androidx.core.content.ContextCompat;
-
 import com.xiaomi.channel.commonutils.logger.MyLog;
 import com.xiaomi.push.service.PushConstants;
 import com.xiaomi.push.service.PushServiceConstants;
 import com.xiaomi.push.service.timers.Alarm;
+import com.xiaomi.xmsf.push.control.PushServiceDispatcher;
 
 public class MiPushPingReceiver extends BroadcastReceiver {
 
@@ -18,20 +17,15 @@ public class MiPushPingReceiver extends BroadcastReceiver {
     }
 
     public void onReceive(Context paramContext, Intent paramIntent) {
+        if (paramIntent == null) {
+            return;
+        }
         MyLog.v(paramIntent.getPackage() + " is the package name");
         if (PushConstants.ACTION_PING_TIMER.equals(paramIntent.getAction())) {
             if (TextUtils.equals(paramContext.getPackageName(), paramIntent.getPackage())) {
                 MyLog.v("Ping XMChannelService on timer");
-
-                try {
-                    Intent localIntent = new Intent(paramContext, com.xiaomi.push.service.XMPushService.class);
-                    localIntent.putExtra(PushServiceConstants.EXTRA_TIME_STAMP, System.currentTimeMillis());
-                    localIntent.setAction(PushServiceConstants.ACTION_TIMER);
-                    ContextCompat.startForegroundService(paramContext, localIntent);
-                } catch (Exception localException) {
-                    MyLog.e(localException);
-                }
-
+                PushServiceDispatcher.dispatchStart(
+                        paramContext, PushServiceConstants.ACTION_TIMER, false);
             } else {
                 MyLog.w("cancel the old ping timer");
                 Alarm.stop();

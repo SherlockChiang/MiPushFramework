@@ -1,5 +1,9 @@
 package com.xiaomi.xmsf.push.notification;
 
+import static top.trumeet.common.utils.NotificationAlertUtils.NOTIFY_TYPE_LIGHTS;
+import static top.trumeet.common.utils.NotificationAlertUtils.NOTIFY_TYPE_SOUND;
+import static top.trumeet.common.utils.NotificationAlertUtils.NOTIFY_TYPE_VIBRATE;
+import static top.trumeet.common.utils.NotificationAlertUtils.usesPackageResourceSound;
 import static top.trumeet.common.utils.NotificationUtils.getChannelIdByPkg;
 import static top.trumeet.common.utils.NotificationUtils.getGroupIdByPkg;
 
@@ -43,15 +47,26 @@ public class NotificationChannelManager {
         CustomConfiguration configuration = XMPushUtils.getConfiguration(metaInfo);
         String channelName = configuration.channelName("未分类");
         String channelDescription = configuration.channelDescription(null);
-        String sound = configuration.soundUrl(null);
+        String sound = configuration.soundUri(null);
 
         NotificationChannel channel = null;
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            channel = new NotificationChannel(getChannelId(metaInfo, packageName), channelName, NotificationManager.IMPORTANCE_DEFAULT);
+            int importance = configuration.channelImportance(
+                    NotificationManager.IMPORTANCE_DEFAULT);
+            int notifyType = metaInfo.getNotifyType();
+            channel = new NotificationChannel(
+                    getChannelId(metaInfo, packageName), channelName, importance);
             channel.setDescription(channelDescription);
-            if (sound != null) {
+            channel.enableVibration(
+                    (notifyType & NOTIFY_TYPE_VIBRATE) != 0);
+            channel.enableLights(
+                    (notifyType & NOTIFY_TYPE_LIGHTS) != 0);
+            if ((notifyType & NOTIFY_TYPE_SOUND) == 0) {
+                channel.setSound(null, null);
+            } else if (usesPackageResourceSound(notifyType, sound, packageName)) {
                 AudioAttributes attr = new AudioAttributes.Builder()
-                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                         .build();
                 channel.setSound(Uri.parse(sound), attr);
             }
@@ -102,9 +117,10 @@ public class NotificationChannelManager {
                 packageName, Arrays.asList(notificationChannelGroup));
 
         NotificationChannel notificationChannel = createChannelWithPackage(metaInfo, packageName);
-        if (notificationChannel != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            notificationChannel.setGroup(notificationChannelGroup.getId());
+        if (notificationChannel == null) {
+            return null;
         }
+        notificationChannel.setGroup(notificationChannelGroup.getId());
 
         getNotificationManagerEx().createNotificationChannels(
                 packageName, Arrays.asList(notificationChannel));

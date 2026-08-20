@@ -1,22 +1,17 @@
 package top.trumeet.mipushframework.main
 
-
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Divider
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
@@ -25,19 +20,21 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.google.android.material.elevation.SurfaceColors
 import com.xiaomi.xmsf.R
 import top.trumeet.mipushframework.component.MarkdownView
 import top.trumeet.ui.theme.Theme
+import top.yukonga.miuix.kmp.basic.BasicComponent
+import top.yukonga.miuix.kmp.basic.SmallTitle
+import top.yukonga.miuix.kmp.basic.Surface
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.io.InputStreamReader
 
 class HelpPage : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            val color = SurfaceColors.SURFACE_2.getColor(this)
-            window.statusBarColor = color
             Theme {
+                window.statusBarColor = MiuixTheme.colorScheme.surfaceContainer.toArgb()
                 HelpList()
             }
         }
@@ -67,10 +64,15 @@ fun HelpList(modifier: Modifier = Modifier) {
 
 @Composable
 fun HelpList(navController: NavHostController) {
-    Column {
-        FAQ(navController)
-        Divider()
-        ContactUs()
+    Surface(color = MiuixTheme.colorScheme.background) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+            Group(stringResource(R.string.helplib_title_faq)) {
+                FAQ(navController)
+            }
+            Group(stringResource(R.string.helplib_title_contact)) {
+                ContactUs()
+            }
+        }
     }
 }
 
@@ -85,7 +87,6 @@ private fun Markdown(markdownResId: Int?) {
 private fun FAQ(
     navController: NavHostController
 ) {
-    Group(stringResource(R.string.helplib_title_faq))
     for (article in getArticles(LocalContext.current)) {
         ClickableListItem(article.titleRes) {
             navController.navigate("markdown/${article.markdownRes}") // 跳转并传递数据
@@ -96,7 +97,6 @@ private fun FAQ(
 @Composable
 private fun ContactUs() {
     val context = LocalContext.current
-    Group(stringResource(R.string.helplib_title_contact))
     ClickableListItem(R.string.helplib_action_qq_group) {
         openUrl(context, "https://pd.qq.com/s/4tsiu8hlu")
     }
@@ -109,13 +109,14 @@ private fun ContactUs() {
 }
 
 @Composable
-private fun Group(title: String) {
-    Text(
+private fun Group(title: String, content: @Composable () -> Unit) {
+    SmallTitle(
         text = title,
-        style = MaterialTheme.typography.headlineSmall,
-        color = MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier.padding(16.dp)
+        modifier = Modifier.fillMaxWidth(),
     )
+    top.yukonga.miuix.kmp.basic.Card(modifier = Modifier.fillMaxWidth()) {
+        content()
+    }
 }
 
 @Composable
@@ -125,19 +126,11 @@ private fun ClickableListItem(textResourceId: Int, onClick: () -> Unit) {
 
 @Composable
 private fun ClickableListItem(item: String, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .clickable(onClick = onClick)
-            .padding(16.dp)
-            .padding(start = 24.dp)
-            .fillMaxWidth()
-    ) {
-        Text(
-            text = item,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-    }
+    BasicComponent(
+        modifier = Modifier.fillMaxWidth(),
+        title = item,
+        onClick = onClick,
+    )
 }
 
 private fun openUrl(context: Context, url: String) {

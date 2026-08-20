@@ -3,11 +3,14 @@
         xmlns:tools="http://schemas.android.com/tools">
 
     <permission
-            android:name="com.xiaomi.xmsf.permission.MIPUSH_RECEIVE"
+            android:name="${mipushReceivePermission}"
             android:protectionLevel="signature" />
 
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    <uses-permission android:name="com.xiaomi.xmsf.permission.MIPUSH_RECEIVE" />
+    <uses-permission android:name="${mipushReceivePermission}" />
     <uses-permission android:name="com.xiaomi.permission.SEND_PUSH" />
 
     <uses-permission android:name="android.permission.INTERNET" />
@@ -65,7 +68,8 @@
         -->
         <activity
                 android:name="top.trumeet.mipushframework.wizard.WelcomeActivity"
-                android:icon="@mipmap/ic_launcher">
+                android:icon="@mipmap/ic_launcher"
+                android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -89,7 +93,7 @@
 
         <provider
                 android:name="androidx.core.content.FileProvider"
-                android:authorities="top.trumeet.mipushframework.fileprovider"
+                android:authorities="${applicationId}.fileprovider"
                 android:exported="false"
                 android:grantUriPermissions="true">
             <meta-data
@@ -97,13 +101,13 @@
                     android:resource="@xml/filepaths" />
         </provider>
 
-        <receiver android:name=".push.service.receivers.BootReceiver">
+        <receiver android:name=".push.service.receivers.BootReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
 
-        <receiver android:name=".push.service.receivers.NetworkStatusReceiver">
+        <receiver android:name=".push.service.receivers.NetworkStatusReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.net.conn.CONNECTIVITY_CHANGE" />
             </intent-filter>
@@ -119,7 +123,7 @@
 
         <receiver
                 android:name=".push.service.receivers.PkgUninstallReceiver"
-                android:exported="true">
+                android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.PACKAGE_REMOVED" />
 
@@ -141,7 +145,7 @@
             </intent-filter>
         </receiver>
 
-        <receiver android:name=".push.service.receivers.AccountChangedReceiver">
+        <receiver android:name=".push.service.receivers.AccountChangedReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.accounts.LOGIN_ACCOUNTS_CHANGED" />
             </intent-filter>
@@ -149,18 +153,26 @@
 
         <receiver
                 android:name=".push.service.receivers.NotificationEventReceiver"
+                android:exported="true"
                 android:permission="com.xiaomi.xmsf.permission.NOTIFICATION_ACTIVE">
             <intent-filter>
                 <action android:name="com.xiaomi.xmsf.push.NOTIFICATION_ACTIVE" />
             </intent-filter>
         </receiver>
-        <receiver android:name="com.xiaomi.push.service.SelfUpdateReceiver">
+        <receiver android:name="com.xiaomi.push.service.SelfUpdateReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 
-        <receiver android:name="com.xiaomi.push.revival.NotificationsRevivalForSelfUpdated" />
+        <receiver android:name="com.xiaomi.push.revival.NotificationsRevivalForSelfUpdated" android:exported="false" />
+
+        <!-- IceBox sends state callbacks from its own package. The SDK manifest predates
+             Android 12 and omitted exported; keep this receiver externally reachable. -->
+        <receiver
+                android:name="com.catchingnow.icebox.sdk_client.StateReceiver"
+                android:exported="true"
+                tools:replace="android:exported" />
 
         <service
                 android:name=".push.service.HttpService"
@@ -168,10 +180,15 @@
 
         <service
                 android:name=".push.service.XMPushService"
-                android:exported="true" />
+                android:exported="false" />
         <service
                 android:name="com.xiaomi.push.service.XMPushService"
-                android:exported="true" />
+                android:exported="true"
+                android:foregroundServiceType="specialUse">
+            <property
+                    android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                    android:value="persistent push transport for devices without a system push provider" />
+        </service>
 
 
         <!--app -->
@@ -198,6 +215,7 @@
         <!-- Push API -->
         <service
                 android:name="top.trumeet.common.ita.DetectionService"
+                android:exported="true"
                 android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />

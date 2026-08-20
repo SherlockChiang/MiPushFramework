@@ -32,8 +32,6 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 
-import top.trumeet.common.Constants;
-
 /**
  * Created by Trumeet on 2017/8/28.
  *
@@ -92,7 +90,7 @@ public class LogUtils {
                     zipFile.getAbsolutePath());
             Uri fileUri = FileProvider.getUriForFile(
                     context,
-                    Constants.AUTHORITY_FILE_PROVIDER,
+                    context.getPackageName() + ".fileprovider",
                     zipFile);
             if (fileUri == null || !zipFile.exists()) {
                 throw new NullPointerException();

@@ -25,46 +25,62 @@ public class ForegroundHelper {
 
     public void startForeground() {
         createNotificationGroupForPushStatus();
-        if (Global.ConfigCenter().isStartForegroundService()) {
-            showForegroundNotificationToKeepAlive();
-        } else {
+        // A service reached through startForegroundService() must call
+        // startForeground() even when the user does not want a persistent status
+        // notification. Promote first to satisfy Android's five-second contract,
+        // then leave foreground state immediately for the non-persistent mode.
+        showForegroundNotificationToKeepAlive();
+        if (!Global.ConfigCenter().isStartForegroundService()) {
             stopForegroundNotification();
         }
     }
 
     public void stopForegroundNotification() {
-        ServiceCompat.stopForeground(service, ServiceCompat.STOP_FOREGROUND_REMOVE);
+        try {
+            ServiceCompat.stopForeground(service, ServiceCompat.STOP_FOREGROUND_REMOVE);
+        } catch (Throwable ignored) {
+        }
     }
 
     void showForegroundNotificationToKeepAlive() {
-        //if (ConfigCenter.getInstance().foregroundNotification || Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        {
-            Notification notification = new NotificationCompat.Builder(service,
-                    CHANNEL_STATUS)
-                    .setContentTitle(service.getString(R.string.notification_alive))
-                    .setSmallIcon(R.drawable.ic_notifications_black_24dp)
-                    .setPriority(NotificationCompat.PRIORITY_MIN)
-                    .setOngoing(true)
-                    .setShowWhen(true)
-                    .build();
+        Notification notification = new NotificationCompat.Builder(service,
+                CHANNEL_STATUS)
+                .setContentTitle(service.getString(R.string.notification_alive))
+                .setSmallIcon(R.drawable.ic_notifications_black_24dp)
+                .setPriority(NotificationCompat.PRIORITY_MIN)
+                .setOngoing(true)
+                .setShowWhen(true)
+                .build();
 
-            service.startForeground(NOTIFICATION_ALIVE_ID, notification);
+        try {
+            int foregroundServiceType = 0;
+            if (Build.VERSION.SDK_INT >= 34) {
+                // ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE = 0x40000000 (1 << 30)
+                foregroundServiceType = 0x40000000;
+            }
+            ServiceCompat.startForeground(service, NOTIFICATION_ALIVE_ID, notification, foregroundServiceType);
+        } catch (Throwable e) {
+            // Catches android.app.ForegroundServiceStartNotAllowedException on API 31+
+            // and SecurityException / IllegalStateException
         }
     }
 
     void createNotificationGroupForPushStatus() {
-        NotificationManagerCompat manager = NotificationManagerCompat.from(service.getApplicationContext());
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            String groupId = "status_group";
-            NotificationChannelGroupCompat.Builder group =
-                    new NotificationChannelGroupCompat.Builder(groupId)
-                            .setName(CHANNEL_STATUS);
-            manager.createNotificationChannelGroup(group.build());
+        try {
+            NotificationManagerCompat manager = NotificationManagerCompat.from(service.getApplicationContext());
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                String groupId = "status_group";
+                NotificationChannelGroupCompat.Builder group =
+                        new NotificationChannelGroupCompat.Builder(groupId)
+                                .setName(CHANNEL_STATUS);
+                manager.createNotificationChannelGroup(group.build());
 
-            NotificationChannelCompat.Builder channel = new NotificationChannelCompat.Builder(
-                    CHANNEL_STATUS, NotificationManager.IMPORTANCE_MIN)
-                    .setName(service.getString(R.string.notification_category_alive)).setGroup(groupId);
-            manager.createNotificationChannel(channel.build());
+                NotificationChannelCompat.Builder channel = new NotificationChannelCompat.Builder(
+                        CHANNEL_STATUS, NotificationManager.IMPORTANCE_MIN)
+                        .setName(service.getString(R.string.notification_category_alive)).setGroup(groupId);
+                manager.createNotificationChannel(channel.build());
+            }
+        } catch (Throwable ignored) {
         }
     }
 }

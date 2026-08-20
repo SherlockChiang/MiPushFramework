@@ -13,10 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -36,7 +32,6 @@ import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.DialogProperties
 import com.elvishew.xlog.XLog
 import com.xiaomi.xmsf.R
 import com.xiaomi.xmsf.push.utils.RegSecUtils
@@ -48,8 +43,13 @@ import top.trumeet.common.utils.Utils
 import top.trumeet.mipush.provider.entities.Event
 import top.trumeet.mipush.provider.event.type.TypeFactory
 import top.trumeet.mipushframework.component.AppIcon
+import top.trumeet.mipushframework.component.MiuixActionButton
+import top.trumeet.mipushframework.component.MiuixDialog
 import top.trumeet.mipushframework.component.RefreshableLazyColumn
 import top.trumeet.mipushframework.component.TextView
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.text.SimpleDateFormat
 import java.util.Date
 
@@ -130,14 +130,34 @@ private fun EventDetailsDialog(
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
     val targetHeight = screenHeight * 0.9f
 
-    AlertDialog(
-        onDismiss,
-        {
+    val show = remember(clickedEvent.id) { mutableStateOf(true) }
+    MiuixDialog(
+        title = "Developer Info",
+        show = show,
+        onDismiss = {
+            onDismiss()
+        },
+        modifier = Modifier.heightIn(Dp.Unspecified, targetHeight),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                MiuixActionButton(onClick = {
+                    EventListPageUtils.startManagePermissions(
+                        context,
+                        clickedEvent.packageName
+                    )
+                }) { Text(stringResource(R.string.action_app_info)) }
+            }
+            TextView(json)
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                TextButton({
+                MiuixActionButton(onClick = {
                     json =
                         EventListPageUtils.getContent(
                             clickedEvent.event,
@@ -145,11 +165,11 @@ private fun EventDetailsDialog(
                         )
                 }) { Text(stringResource(R.string.action_configurate)) }
 
-                TextButton({
+                MiuixActionButton(onClick = {
                     EventListPageUtils.copyToClipboard(context, json)
                 }) { Text(stringResource(android.R.string.copy)) }
 
-                TextButton({
+                MiuixActionButton(onClick = {
                     EventListPageUtils.mockMessage(
                         RegSecUtils.getContainerWithRegSec(
                             clickedEvent.event
@@ -157,30 +177,8 @@ private fun EventDetailsDialog(
                     )
                 }) { Text(stringResource(R.string.action_notify)) }
             }
-        },
-        title = {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .height(36.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Developer Info", style = MaterialTheme.typography.titleLarge)
-
-                TextButton({
-                    EventListPageUtils.startManagePermissions(
-                        context,
-                        clickedEvent.packageName
-                    )
-                }) { Text(stringResource(R.string.action_app_info)) }
-            }
-        },
-        text = {
-            TextView(json)
-        },
-        modifier = Modifier.heightIn(Dp.Unspecified, targetHeight)
-    )
+        }
+    }
 }
 
 private val g_items = mutableStateListOf<EventInfoForDisplay>()
@@ -199,28 +197,49 @@ fun EventList(
         else mutableStateListOf()
     }
 
+    var hasMore by rememberSaveable(query, packageName) { mutableStateOf(true) }
 
     val refreshScope = rememberCoroutineScope { Dispatchers.IO }
     val doLoadMore: (onRefreshed: () -> Unit) -> Unit = { onRefreshed ->
         refreshScope.launch {
-            items.addAll(getEvents(items.isEmpty()))
-            onRefreshed()
+            try {
+                val elements = getEvents(items.isEmpty())
+                withContext(Dispatchers.Main) {
+                    val knownIds = items.asSequence().map { it.id }.toHashSet()
+                    val newElements = elements.filter { knownIds.add(it.id) }
+                    items.addAll(newElements)
+                    // A short page is the authoritative end-of-data signal.  Empty pages must
+                    // also stop the observer, otherwise an empty list satisfies size - 10 and
+                    // causes an endless load loop.
+                    hasMore = elements.size >= Constants.PAGE_SIZE && newElements.isNotEmpty()
+                    onRefreshed()
+                }
+            } catch (t: Throwable) {
+                withContext(Dispatchers.Main) { onRefreshed() }
+            }
         }
     }
     var isNeedRefresh by rememberSaveable(query) { mutableStateOf(true) }
     val doRefresh: (onRefreshed: () -> Unit) -> Unit = { onRefreshed ->
         refreshScope.launch {
-            val elements = getEvents(true)
-            withContext(Dispatchers.Main) {
-                items.clear()
-                items.addAll(elements)
-                isNeedRefresh = false
-                onRefreshed()
+            try {
+                val elements = getEvents(true)
+                withContext(Dispatchers.Main) {
+                    items.clear()
+                    items.addAll(elements.distinctBy { it.id })
+                    hasMore = elements.size >= Constants.PAGE_SIZE && elements.isNotEmpty()
+                    isNeedRefresh = false
+                    onRefreshed()
+                }
+            } catch (t: Throwable) {
+                withContext(Dispatchers.Main) { onRefreshed() }
             }
         }
     }
 
-    val isNeedMore: (Int) -> Boolean = { it >= items.size - 10 }
+    val isNeedMore: (Int) -> Boolean = { lastIndex ->
+        hasMore && items.isNotEmpty() && lastIndex >= (items.size - 10).coerceAtLeast(0)
+    }
 
     RefreshableLazyColumn(doRefresh, isNeedMore, doLoadMore, isNeedRefresh) {
         items(items, { it.id }) {
@@ -233,23 +252,31 @@ fun EventList(
 private fun EventItem(item: EventInfoForDisplay, onClick: (EventInfoForDisplay) -> Unit) {
     val disabled = item.configOptions.contains("disable")
     val alpha = if (disabled) 0.5f else 1f
-    Row(
-        Modifier
-            .clickable { onClick(item) }
-            .padding(10.dp).alpha(alpha),
-        verticalAlignment = Alignment.CenterVertically
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 5.dp),
     ) {
-        AppIcon(item.packageName, item.appName, modifier = Modifier.size(48.dp))
-        Spacer(Modifier.width(20.dp))
-        Column {
-            Row {
-                ConfigOptions(item)
-                ChannelInfo(item)
-                Spacer(Modifier.weight(1f))
-                EventReceiveDate(item)
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable { onClick(item) }
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+                .alpha(alpha),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            AppIcon(item.packageName, item.appName, modifier = Modifier.size(48.dp))
+            Spacer(Modifier.width(16.dp))
+            Column(Modifier.weight(1f)) {
+                Row {
+                    ConfigOptions(item)
+                    ChannelInfo(item)
+                    Spacer(Modifier.weight(1f))
+                    EventReceiveDate(item)
+                }
+                EventTitle(item)
+                EventContent(item)
             }
-            EventTitle(item)
-            EventContent(item)
         }
     }
 }
@@ -257,28 +284,28 @@ private fun EventItem(item: EventInfoForDisplay, onClick: (EventInfoForDisplay) 
 @Composable
 private fun ConfigOptions(item: EventInfoForDisplay) {
     if (item.configOptions.isNotEmpty()) {
-        Text(item.configOptions.toString(), style = MaterialTheme.typography.bodySmall)
+        Text(item.configOptions.toString(), style = MiuixTheme.textStyles.footnote1)
         Spacer(Modifier.width(5.dp))
     }
 }
 
 @Composable
 private fun ChannelInfo(item: EventInfoForDisplay) {
-    Text(item.channel, style = MaterialTheme.typography.bodySmall)
+    Text(item.channel, style = MiuixTheme.textStyles.footnote1)
 }
 
 
 @Composable
 private fun EventReceiveDate(item: EventInfoForDisplay) {
     val format = receiveDateFormat
-    Text(format.format(item.receiveDate), style = MaterialTheme.typography.bodySmall)
+    Text(format.format(item.receiveDate), style = MiuixTheme.textStyles.footnote1)
 }
 
 @Composable
 private fun EventTitle(item: EventInfoForDisplay) {
     Text(
         item.title,
-        style = MaterialTheme.typography.bodyLarge,
+        style = MiuixTheme.textStyles.body1,
     )
 }
 
@@ -286,7 +313,7 @@ private fun EventTitle(item: EventInfoForDisplay) {
 private fun EventContent(item: EventInfoForDisplay) {
     Text(
         item.content,
-        style = MaterialTheme.typography.bodyMedium,
+        style = MiuixTheme.textStyles.body2,
     )
 }
 

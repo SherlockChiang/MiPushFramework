@@ -104,7 +104,10 @@ public class ApplicationPageOperation {
         } else {
             application = registerApplication(currentAppPkgName);
         }
-        application.existServices = hasMiPushServices(checker, info);
+        RegisteredApplication.ServiceProbeState probeState = probeMiPushServices(checker, info);
+        application.setServiceProbeState(probeState);
+        // Keep the legacy boolean populated for Java/Kotlin callers and older UI code.
+        application.existServices = probeState == RegisteredApplication.ServiceProbeState.PRESENT;
         return application;
     }
 
@@ -120,11 +123,49 @@ public class ApplicationPageOperation {
 
     public static boolean shouldShowInList(PackageInfo info, Map<String, RegisteredApplication> registeredPkgs, MiPushManifestChecker checker) {
         return isApplicationInstalled(info) &&
-                (isPackageStoredInDB(registeredPkgs, info) || hasMiPushServices(checker, info));
+                (isPackageStoredInDB(registeredPkgs, info) ||
+                        probeMiPushServices(checker, info) == RegisteredApplication.ServiceProbeState.PRESENT);
     }
 
+    /**
+     * Probe the target application's MiPush SDK services without collapsing a probe failure into
+     * "missing".  PackageManager may hide service metadata for system apps or a ROM may not expose
+     * the checker implementation; both cases are UNKNOWN and should not be rendered as an error.
+     */
+    public static RegisteredApplication.ServiceProbeState probeMiPushServices(
+            MiPushManifestChecker checker, PackageInfo info) {
+        if (checker == null || info == null || info.services == null) {
+            return RegisteredApplication.ServiceProbeState.UNKNOWN;
+        }
+        try {
+            return mapServiceCheckResult(checker.checkServicesState(info));
+        } catch (Throwable ignored) {
+            // A checker implementation is loaded from the system push package and may fail on
+            // vendor-specific metadata.  Preserve that distinction for the UI.
+            return RegisteredApplication.ServiceProbeState.UNKNOWN;
+        }
+    }
+
+    /** Pure mapping kept separate so probe-state behavior can be tested without Android services. */
+    public static RegisteredApplication.ServiceProbeState mapServiceCheckResult(
+            MiPushManifestChecker.ServiceCheckResult result) {
+        if (result == null) {
+            return RegisteredApplication.ServiceProbeState.UNKNOWN;
+        }
+        switch (result) {
+            case PRESENT:
+                return RegisteredApplication.ServiceProbeState.PRESENT;
+            case MISSING:
+                return RegisteredApplication.ServiceProbeState.MISSING;
+            case UNKNOWN:
+            default:
+                return RegisteredApplication.ServiceProbeState.UNKNOWN;
+        }
+    }
+
+    /** Legacy boolean API retained for callers that only need a positive capability check. */
     public static boolean hasMiPushServices(MiPushManifestChecker checker, PackageInfo info) {
-        return checker != null && checker.checkServices(info);
+        return probeMiPushServices(checker, info) == RegisteredApplication.ServiceProbeState.PRESENT;
     }
 
     public static boolean isPackageStoredInDB(Map<String, RegisteredApplication> registeredPkgs, PackageInfo info) {

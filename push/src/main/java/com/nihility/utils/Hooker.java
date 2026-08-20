@@ -66,7 +66,6 @@ public class Hooker {
 
     private static void hookMiPushSDK(final Context context) {
         try {
-            hookField(SmackConfiguration.class, "pingInterval", 3 * 60 * 1000);
             hookMiPushServerHost();
             AppRegionStorage regionStorage = AppRegionStorage.getInstance(context.getApplicationContext());
             regionStorage.setRegion(Region.China.name());

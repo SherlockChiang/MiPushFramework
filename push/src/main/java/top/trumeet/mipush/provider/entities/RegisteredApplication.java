@@ -113,11 +113,48 @@ public class RegisteredApplication implements Parcelable {
         int Unregistered = 2;
     }
 
+    /**
+     * Result of the best-effort MiPush manifest service probe.
+     *
+     * <p>This is deliberately transient: service visibility is a property of the current
+     * PackageManager/ROM and must not be persisted with a registration record.  MISSING means
+     * the checker ran and found the required SDK services absent or invalid; UNKNOWN means the
+     * checker could not run or the package metadata was not visible to us.</p>
+     */
+    public enum ServiceProbeState {
+        UNKNOWN,
+        PRESENT,
+        MISSING
+    }
+
     @RegisteredType
     private int registeredType = RegisteredType.NotRegistered;
 
     @Transient
     public boolean existServices = false;
+    /**
+     * New tri-state service probe result.  The MISSING default preserves the historical meaning
+     * of {@link #existServices} for callers that construct an entity manually and only set the
+     * legacy boolean.  ApplicationPageOperation always assigns an explicit probe result.
+     */
+    @Transient
+    public ServiceProbeState serviceProbeState = ServiceProbeState.MISSING;
+
+    /**
+     * Resolve the tri-state value while honoring legacy callers that only set
+     * {@link #existServices}.  A positive legacy value is unambiguous; false retains the
+     * historical MISSING default unless the caller explicitly assigns UNKNOWN.
+     */
+    public ServiceProbeState getServiceProbeState() {
+        if (serviceProbeState == ServiceProbeState.MISSING && existServices) {
+            return ServiceProbeState.PRESENT;
+        }
+        return serviceProbeState;
+    }
+
+    public void setServiceProbeState(ServiceProbeState state) {
+        serviceProbeState = state == null ? ServiceProbeState.UNKNOWN : state;
+    }
     public String appName = "";
     @Transient
     public String appNamePinYin = "";

@@ -1,39 +1,47 @@
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
 
 buildscript {
-    ext.kotlin_version = '1.8.0'
+    ext.kotlin_version = '2.0.21'
 
     repositories {
+        // Prefer the canonical repositories on CI.  A transient 5xx from the
+        // Aliyun mirror is treated as a hard resolution failure by Gradle and
+        // prevents it from falling through to the repositories below.
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+        maven { url 'https://jitpack.io' }
+
+        // Keep the mirrors as a fallback for users on networks where the
+        // canonical endpoints are unavailable.
         maven { url = uri("https://maven.aliyun.com/repository/central") }
         maven { url = uri("https://maven.aliyun.com/repository/public") }
         maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
         maven { url = uri("https://maven.aliyun.com/repository/google") }
-
-        mavenCentral()
-        maven { url 'https://jitpack.io' }
-        gradlePluginPortal()
-        google()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:7.4.2'
-        classpath 'org.greenrobot:greendao-gradle-plugin:3.3.0'
+        classpath 'com.android.tools.build:gradle:8.2.2'
+        classpath 'org.greenrobot:greendao-gradle-plugin:3.3.1'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
-        classpath 'io.github.wurensen:gradle-android-plugin-aspectjx:3.3.2'
+        classpath "org.jetbrains.kotlin:compose-compiler-gradle-plugin:$kotlin_version"
+        classpath 'io.freefair.gradle:android-gradle-plugins:8.2.2'
     }
 
 }
 
 allprojects {
     repositories {
+        // See buildscript.repositories above.  The order is intentional:
+        // canonical sources first, mirrors only as a fallback.
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+        maven { url 'https://jitpack.io' }
+
         maven { url = uri("https://maven.aliyun.com/repository/central") }
         maven { url = uri("https://maven.aliyun.com/repository/public") }
         maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
         maven { url = uri("https://maven.aliyun.com/repository/google") }
-
-        mavenCentral()
-        maven { url 'https://jitpack.io' }
-        gradlePluginPortal()
-        google()
     }
 
     gradle.taskGraph.whenReady {
@@ -100,8 +108,8 @@ private String getVersionNameFromGit() {
 }
 
 ext {
-    minSdkVersion = 21
-    compileSdkVersion = 33
+    minSdkVersion = 26
+    compileSdkVersion = 34
     targetSdkVersion = 30
     pushVersionCode = 7
 

@@ -2,6 +2,8 @@ package com.xiaomi.xmsf.push.notification;
 
 import static com.xiaomi.push.service.MyMIPushNotificationHelper.getNotificationTag;
 import static com.xiaomi.push.service.MyNotificationIconHelper.KiB;
+import static top.trumeet.common.utils.NotificationAlertUtils.NOTIFY_TYPE_SOUND;
+import static top.trumeet.common.utils.NotificationAlertUtils.usesPackageResourceSound;
 
 import android.annotation.TargetApi;
 import android.app.Notification;
@@ -12,10 +14,15 @@ import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.drawable.Icon;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.SystemClock;
+import android.provider.Settings;
 import android.service.notification.StatusBarNotification;
 import android.text.TextUtils;
+import android.util.LruCache;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -37,8 +44,27 @@ import com.xiaomi.xmsf.push.utils.Configurations;
 import com.xiaomi.xmsf.push.utils.IconConfigurations;
 import com.xiaomi.xmsf.utils.ColorUtil;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
+
 import top.trumeet.common.utils.CustomConfiguration;
 import top.trumeet.common.utils.ImgUtils;
+import top.trumeet.common.utils.NotificationMetadata;
 import top.trumeet.mipushframework.main.AdvancedSettingsPage;
 
 /**
@@ -51,7 +77,15 @@ public class NotificationController {
 
     private static final String NOTIFICATION_LARGE_ICON = "mipush_notification";
     private static final String NOTIFICATION_SMALL_ICON = "mipush_small_notification";
-
+    private static final String FOCUS_PROTOCOL_SETTING = "notification_focus_protocol";
+    private static final String FOCUS_PARAM = "miui.focus.param";
+    private static final String FOCUS_PICTURES = "miui.focus.pics";
+    private static final long FOCUS_PROTOCOL_CACHE_TTL_MILLIS = 5 * 60 * 1000L;
+    private static final FocusProtocolSupportCache FOCUS_PROTOCOL_SUPPORT_CACHE =
+            new FocusProtocolSupportCache(FOCUS_PROTOCOL_CACHE_TTL_MILLIS);
+    // The official client permits a much longer network timeout. Holding our
+    // notification worker for that long can starve all push notifications, so the
+    // native-icon enhancement gets a small global budget while the URL payload stays.
     public static final String CHANNEL_WARN = "warn";
 
     public static NotificationManagerEx getNotificationManagerEx() {
@@ -76,7 +110,11 @@ public class NotificationController {
         builder.setCategory(Notification.CATEGORY_EVENT)
                 .setGroupSummary(true)
                 .setGroup(groupId);
-        notify(context, groupId.hashCode(), packageName, builder, metaInfo);
+        // The summary is an implementation detail of Android notification
+        // grouping.  It has no application focus payload of its own; processing
+        // the source message again here would duplicate extras and image work.
+        notify(context, groupId.hashCode(), packageName, getNotificationTag(packageName),
+                builder, metaInfo, false, false);
     }
 
     @RequiresApi(api = Build.VERSION_CODES.M)
@@ -90,10 +128,16 @@ public class NotificationController {
         StatusBarNotification[] activeNotifications =
                 getNotificationManagerEx().getActiveNotifications(packageName);
 
-
+        if (activeNotifications == null) {
+            return 0;
+        }
         int notificationCntInGroup = 0;
         for (StatusBarNotification statusBarNotification : activeNotifications) {
-            if (groupId.equals(statusBarNotification.getNotification().getGroup())) {
+            if (statusBarNotification != null
+                    && statusBarNotification.getNotification() != null
+                    && groupId.equals(statusBarNotification.getNotification().getGroup())
+                    && (statusBarNotification.getNotification().flags
+                    & Notification.FLAG_GROUP_SUMMARY) == 0) {
                 notificationCntInGroup++;
             }
         }
@@ -106,13 +150,66 @@ public class NotificationController {
 
         notificationBuilder.setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN);
 
-        //for VERSION < Oero
-        notificationBuilder.setDefaults(Notification.DEFAULT_ALL);
+        applyAlertBehavior(metaInfo, packageName, notificationBuilder);
         notificationBuilder.setPriority(Notification.PRIORITY_HIGH);
 
-        Notification notification = notify(context, notificationId, packageName, notificationBuilder, metaInfo);
+        boolean attemptFocus = shouldAttachFocusExtras(context, metaInfo);
+        if (attemptFocus) {
+            // The official group supplied by the client always wins. Debug and
+            // other direct callers otherwise get a stable focus-only group so a
+            // normal notification from the same app cannot fold it away.
+            boolean hasOfficialGroup = hasOfficialNotificationGroup(metaInfo);
+            try {
+                Notification preview = notificationBuilder.build();
+                String existingGroup = preview.getGroup();
+                if (!hasOfficialGroup
+                        && (TextUtils.isEmpty(existingGroup)
+                        || packageName.equals(existingGroup))) {
+                    notificationBuilder.setGroup(
+                            FocusNotificationSafety.stableFocusGroup(packageName));
+                }
+            } catch (Throwable error) {
+                logger.w("Unable to inspect focus-notification group", error);
+            }
+        }
+
+        String notificationTag = getNotificationTag(packageName);
+        Notification notification = FocusNotificationSafety.deliverWithSingleFallback(
+                packageName,
+                notificationTag,
+                notificationId,
+                attemptFocus,
+                (deliveryPackage, deliveryTag, deliveryId, includeFocusExtras,
+                 focusFailure) -> {
+                    if (!includeFocusExtras) {
+                        if (focusFailure != null) {
+                            logger.w("Focus notification failed; retrying as a standard notification",
+                                    focusFailure);
+                        }
+                        stripFocusNotificationExtras(notificationBuilder);
+                    }
+                    return notify(context, deliveryId, deliveryPackage, deliveryTag,
+                            notificationBuilder, metaInfo, true, includeFocusExtras);
+                });
 
         updateSummaryNotification(context, metaInfo, packageName, notification.getGroup());
+    }
+
+    private static boolean hasOfficialNotificationGroup(@Nullable PushMetaInfo metaInfo) {
+        if (metaInfo == null) {
+            return false;
+        }
+        try {
+            CustomConfiguration configuration = XMPushUtils.getConfiguration(metaInfo);
+            String configuredGroup = configuration.notificationGroup(null);
+            return (configuredGroup != null && !configuredGroup.trim().isEmpty())
+                    || metaInfo.passThrough == 1;
+        } catch (Throwable error) {
+            // If metadata cannot be inspected, preserving a caller-supplied
+            // group is safer than guessing that it is the SDK default.
+            logger.w("Unable to inspect official notification group", error);
+            return true;
+        }
     }
 
     @NonNull
@@ -130,7 +227,9 @@ public class NotificationController {
 
     private static Notification notify(
             Context context, int notificationId, String packageName,
-            NotificationCompat.Builder notificationBuilder, PushMetaInfo metaInfo) {
+            String notificationTag, NotificationCompat.Builder notificationBuilder,
+            PushMetaInfo metaInfo,
+            boolean includeOfficialMetadata, boolean includeFocusExtras) {
         // Make the behavior consistent with official MIUI
         Bundle extras = new Bundle();
         extras.putString("target_package", packageName);
@@ -139,41 +238,494 @@ public class NotificationController {
         // Set small icon
         processIcon(context, packageName, notificationBuilder);
 
-        CustomConfiguration configuration = XMPushUtils.getConfiguration(metaInfo);
-        String iconUri = configuration.notificationLargeIconUri(null);
-        Bitmap largeIcon = getLargeIcon(context, metaInfo, iconUri);
-        if (largeIcon != null) {
-            notificationBuilder.setLargeIcon(largeIcon);
+        CustomConfiguration configuration = null;
+        if (includeOfficialMetadata) {
+            configuration = XMPushUtils.getConfiguration(metaInfo);
+            applyOfficialMetadata(context, packageName, notificationBuilder, configuration);
+            String iconUri = configuration.notificationLargeIconUri(null);
+            Bitmap largeIcon = getLargeIcon(context, metaInfo, iconUri);
+            if (largeIcon != null) {
+                notificationBuilder.setLargeIcon(largeIcon);
+            }
+
+            String subText = configuration.subText(null);
+            buildExtraSubText(context, packageName, notificationBuilder, subText);
+
         }
 
-        String subText = configuration.subText(null);
-        buildExtraSubText(context, packageName, notificationBuilder, subText);
+        ensureReadableStandardContent(context, packageName, notificationBuilder,
+                metaInfo, configuration);
 
-        String focusParam = configuration.focusParam(null);
-        if (focusParam != null) {
-            Bundle focusBundle = new Bundle();
-            focusBundle.putString("miui.focus.param", focusParam);
-
-            Bundle picsBundle = new Bundle();
-            for (String key : configuration.keys()) {
-                if (key.startsWith("miui.focus.pic_")) {
-                    String url = configuration.get(key, null);
-                    focusBundle.putString(key, url);
-                    picsBundle.putParcelable(key,
-                            getBitmapFromUri(context, iconUri, 200 * KiB));
-                }
-            }
-            if (!picsBundle.isEmpty()) {
-                focusBundle.putBundle("miui.focus.pics", picsBundle);
-            }
-            notificationBuilder.addExtras(focusBundle);
+        if (includeFocusExtras && configuration != null) {
+            addFocusNotificationExtras(context, notificationBuilder, configuration);
         }
 
         notificationBuilder.setAutoCancel(true);
         Notification notification = notificationBuilder.build();
+        applyTargetPackage(context, notification, packageName);
         getNotificationManagerEx().notify(
-                packageName, getNotificationTag(packageName), notificationId, notification);
+                packageName, notificationTag, notificationId, notification);
         return notification;
+    }
+
+    private static boolean shouldAttachFocusExtras(Context context, PushMetaInfo metaInfo) {
+        try {
+            CustomConfiguration configuration = XMPushUtils.getConfiguration(metaInfo);
+            CustomConfiguration.FocusNotificationPayload payload =
+                    configuration.focusNotificationPayload();
+            if (!payload.isUsable() || !isFocusProtocolEnabled(context)) {
+                return false;
+            }
+            // Do not hand malformed JSON to the private renderer. Valid picture
+            // URL fields remain independently useful and are still forwarded.
+            return FocusNotificationSafety.isWellFormedParameter(payload.parameter())
+                    || !payload.pictureUrls().isEmpty();
+        } catch (Throwable error) {
+            logger.w("Unable to inspect focus-notification payload", error);
+            return false;
+        }
+    }
+
+    private static void stripFocusNotificationExtras(
+            NotificationCompat.Builder notificationBuilder) {
+        try {
+            stripFocusNotificationExtras(notificationBuilder.getExtras());
+        } catch (Throwable error) {
+            // A malformed Parcelable in a third-party payload must not prevent
+            // the standard retry from being attempted.
+            logger.w("Unable to fully strip focus-notification extras", error);
+        }
+    }
+
+    private static void stripFocusNotificationExtras(@Nullable Bundle extras) {
+        if (extras == null) {
+            return;
+        }
+        // NotificationCompat.addExtras() flattens the focus bundle into the
+        // builder's top-level extras. Removing those protocol keys directly is
+        // sufficient and avoids traversing arbitrary third-party Bundles (which
+        // may be self-referential or contain unparcelable values).
+        for (String key : new ArrayList<>(extras.keySet())) {
+            try {
+                if (FocusNotificationSafety.isFocusExtraKey(key)) {
+                    extras.remove(key);
+                }
+            } catch (Throwable error) {
+                // Keep walking the remaining keys. Bundle access can throw for
+                // a bad parcelable, but no focus key should block delivery.
+            }
+        }
+    }
+
+    private static void ensureReadableStandardContent(
+            Context context,
+            String packageName,
+            NotificationCompat.Builder notificationBuilder,
+            PushMetaInfo metaInfo,
+            @Nullable CustomConfiguration configuration) {
+        String existingTitle = null;
+        String existingBody = null;
+        try {
+            Notification preview = notificationBuilder.build();
+            if (preview.extras != null) {
+                CharSequence title = preview.extras.getCharSequence(Notification.EXTRA_TITLE);
+                CharSequence body = preview.extras.getCharSequence(Notification.EXTRA_TEXT);
+                existingTitle = title == null ? null : title.toString();
+                existingBody = body == null ? null : body.toString();
+            }
+        } catch (Throwable error) {
+            logger.w("Unable to inspect standard notification content", error);
+        }
+
+        String metaTitle = metaInfo == null ? null : metaInfo.getTitle();
+        String metaBody = metaInfo == null ? null : metaInfo.getDescription();
+        String focusParameter = null;
+        if (configuration != null) {
+            try {
+                focusParameter = configuration.focusParam(null);
+            } catch (Throwable error) {
+                logger.w("Unable to read focus-notification parameter", error);
+            }
+        }
+        String fallbackTitle = packageName;
+        try {
+            CharSequence appName = Global.ApplicationNameCache().getAppName(context, packageName);
+            if (appName != null && appName.length() > 0) {
+                fallbackTitle = appName.toString();
+            }
+        } catch (Throwable ignored) {
+        }
+
+        FocusNotificationSafety.ResolvedContent resolved =
+                FocusNotificationSafety.resolveReadableContent(
+                        firstReadable(existingTitle, metaTitle),
+                        firstReadable(existingBody, metaBody),
+                        focusParameter,
+                        fallbackTitle,
+                        "New notification");
+        if (!hasReadableText(existingTitle)) {
+            notificationBuilder.setContentTitle(resolved.title());
+        }
+        if (!hasReadableText(existingBody)) {
+            notificationBuilder.setContentText(resolved.body());
+        }
+    }
+
+    @Nullable
+    private static String firstReadable(@Nullable String first, @Nullable String second) {
+        return hasReadableText(first) ? first : second;
+    }
+
+    private static boolean hasReadableText(@Nullable String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private static void applyOfficialMetadata(
+            Context context,
+            String packageName,
+            NotificationCompat.Builder builder,
+            CustomConfiguration configuration) {
+        NotificationMetadata metadata = NotificationMetadata.from(configuration);
+        Bundle extras = builder.getExtras();
+        String customAppIconUri = configuration.notificationCustomSmallIconUri(null);
+        if (!TextUtils.isEmpty(customAppIconUri)
+                && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Bitmap customAppIcon = getBitmapFromUri(context, customAppIconUri, 200 * KiB);
+            if (customAppIcon != null) {
+                extras.putParcelable("miui.appIcon", Icon.createWithBitmap(customAppIcon));
+                extras.putString("custom_app_icon", "0");
+            }
+        }
+
+        String smallIconUri = configuration.notificationSmallIconUri(null);
+        if (!TextUtils.isEmpty(smallIconUri) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Bitmap icon = getBitmapFromUri(context, smallIconUri, 200 * KiB);
+            if (icon != null) {
+                builder.setSmallIcon(IconCompat.createWithBitmap(icon));
+            }
+        }
+
+        String smallIconColor = configuration.notificationSmallIconColor(null);
+        if (!TextUtils.isEmpty(smallIconColor)) {
+            try {
+                builder.setColor(Color.parseColor(smallIconColor));
+            } catch (IllegalArgumentException ignored) {
+                try {
+                    builder.setColor(Integer.parseInt(smallIconColor));
+                } catch (NumberFormatException ignoredToo) {
+                }
+            }
+        }
+
+        if (metadata.timeoutSeconds != null && metadata.timeoutSeconds > 0) {
+            builder.setTimeoutAfter(metadata.timeoutSeconds * 1000L);
+        }
+
+        Integer backgroundColor = metadata.backgroundColor;
+        if (backgroundColor != null) {
+            builder.setColor(backgroundColor);
+            if (metadata.ongoing == null) builder.setOngoing(true);
+            if (metadata.colorized == null) builder.setColorized(true);
+        }
+        if (metadata.ongoing != null) builder.setOngoing(metadata.ongoing);
+        if (metadata.colorized != null) builder.setColorized(metadata.colorized);
+        if (metadata.visibility != null) builder.setVisibility(metadata.visibility);
+        if (metadata.category != null) builder.setCategory(metadata.category);
+
+        if (configuration.notificationStyle()
+                == CustomConfiguration.NotificationStyle.COLORFUL) {
+            String colorfulStyleBackground =
+                    configuration.notificationColorfulBackgroundColor(null);
+            if (!TextUtils.isEmpty(colorfulStyleBackground)) {
+                try {
+                    // Portable approximation for ROMs without MIUI's private layout.
+                    builder.setColor(Color.parseColor(colorfulStyleBackground));
+                } catch (IllegalArgumentException ignored) {
+                    try {
+                        builder.setColor(Integer.parseInt(colorfulStyleBackground));
+                    } catch (NumberFormatException ignoredToo) {
+                    }
+                }
+            }
+        }
+
+        String imageDescription = configuration.imageDescription(null);
+        if (!TextUtils.isEmpty(imageDescription)) {
+            extras.putCharSequence("miui.imageDescribe", imageDescription);
+        }
+        if (metadata.enableKeyguard != null) extras.putBoolean("miui.enableKeyguard", metadata.enableKeyguard);
+        if (metadata.enableFloat != null) extras.putBoolean("miui.enableFloat", metadata.enableFloat);
+        if (metadata.fold != null) extras.putString("notification_fold", metadata.fold);
+        if (metadata.foldTimeoutSeconds != null && metadata.foldTimeoutSeconds > 0) {
+            extras.putLong("miui.fold.timeout", metadata.foldTimeoutSeconds * 1000L);
+        }
+
+        String styleType = configuration.notificationStyleType(null);
+        if (!TextUtils.isEmpty(styleType)) {
+            extras.putString("miui.notificationStyleType", styleType);
+        }
+        String colorfulText = configuration.notificationColorfulButtonText(null);
+        if (!TextUtils.isEmpty(colorfulText)) {
+            extras.putString("miui.colorfulButtonText", colorfulText);
+        }
+        String colorfulBackground = configuration.notificationColorfulButtonBackgroundColor(null);
+        if (!TextUtils.isEmpty(colorfulBackground)) {
+            extras.putString("miui.colorfulButtonBackgroundColor", colorfulBackground);
+        }
+        if (Boolean.TRUE.equals(metadata.topRepeat)
+                && metadata.topPeriodSeconds != null
+                && metadata.topPeriodSeconds > 0
+                && metadata.topFrequency != null
+                && metadata.topFrequency >= 0
+                && metadata.topFrequency <= metadata.topPeriodSeconds) {
+            builder.setPriority(Notification.PRIORITY_MAX);
+            long originalWhen = builder.build().when;
+            extras.putLong("mipush_org_when", originalWhen);
+            extras.putBoolean("mipush_n_top_flag", true);
+            extras.putInt("mipush_n_top_prd", metadata.topPeriodSeconds);
+            if (metadata.topFrequency > 0) {
+                extras.putInt("mipush_n_top_fre", metadata.topFrequency);
+            }
+        }
+        extras.putString("mipush_target_package", packageName);
+        extras.putString("xmsf_target_package", packageName);
+    }
+
+    /**
+     * HyperOS/MIUI uses a hidden extraNotification target package to attribute a
+     * provider-posted notification to its real client. Keep the normal extras as
+     * a portable fallback, then use reflection only where the platform exposes
+     * the same system API.
+     */
+    private static void applyTargetPackage(Context context, Notification notification,
+                                           String packageName) {
+        if (notification == null || TextUtils.isEmpty(packageName)) {
+            return;
+        }
+        try {
+            Field field = Notification.class.getDeclaredField("extraNotification");
+            field.setAccessible(true);
+            Object extraNotification = field.get(notification);
+            if (extraNotification != null) {
+                Method method = extraNotification.getClass()
+                        .getDeclaredMethod("setTargetPkg", String.class);
+                method.setAccessible(true);
+                method.invoke(extraNotification, packageName);
+                return;
+            }
+        } catch (Throwable ignored) {
+            // AOSP and non-MIUI builds do not expose this hidden API.
+        }
+        try {
+            PackageManager packageManager = context.getPackageManager();
+            CharSequence label = packageManager.getApplicationLabel(
+                    packageManager.getApplicationInfo(packageName, 0));
+            notification.extras.putCharSequence("android.substName", label);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void applyAlertBehavior(
+            PushMetaInfo metaInfo,
+            String packageName,
+            NotificationCompat.Builder notificationBuilder) {
+        int notifyType = metaInfo == null ? 0 : metaInfo.getNotifyType();
+        String soundUri = metaInfo == null
+                ? null
+                : XMPushUtils.getConfiguration(metaInfo).soundUri(null);
+
+        if (usesPackageResourceSound(notifyType, soundUri, packageName)) {
+            notificationBuilder.setDefaults(notifyType & ~NOTIFY_TYPE_SOUND);
+            notificationBuilder.setSound(Uri.parse(soundUri));
+        } else {
+            notificationBuilder.setDefaults(notifyType);
+        }
+    }
+
+    private static void addFocusNotificationExtras(
+            Context context,
+            NotificationCompat.Builder notificationBuilder,
+            CustomConfiguration configuration) {
+        CustomConfiguration.FocusNotificationPayload payload =
+                configuration.focusNotificationPayload();
+        // Avoid a Settings provider round-trip for ordinary notifications.
+        if (!payload.isUsable() || !isFocusProtocolEnabled(context)) {
+            return;
+        }
+
+        Bundle focusBundle = new Bundle();
+        if (FocusNotificationSafety.isWellFormedParameter(payload.parameter())) {
+            focusBundle.putString(FOCUS_PARAM, payload.parameter());
+        }
+        for (Map.Entry<String, String> picture : payload.pictureUrls().entrySet()) {
+            // Supported MIUI SystemUI needs both the URL and the native Icon.
+            focusBundle.putString(picture.getKey(), picture.getValue());
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                && !payload.downloadPictureUrls().isEmpty()) {
+            focusBundle.putBundle(FOCUS_PICTURES,
+                    FocusIconApi23.downloadPictures(context, payload.downloadPictureUrls()));
+        }
+        notificationBuilder.addExtras(focusBundle);
+    }
+
+    private static boolean isFocusProtocolEnabled(Context context) {
+        if (context == null) {
+            return false;
+        }
+        if (!"com.xiaomi.xmsf".equals(context.getPackageName())) {
+            return false;
+        }
+        return FOCUS_PROTOCOL_SUPPORT_CACHE.get(SystemClock.elapsedRealtime(), () -> {
+            int protocolVersion;
+            try {
+                protocolVersion = Settings.System.getInt(context.getContentResolver(),
+                        FOCUS_PROTOCOL_SETTING, 0);
+            } catch (Throwable error) {
+                logger.w("Unable to read focus-notification protocol setting", error);
+                return false;
+            }
+            return CustomConfiguration.FocusNotificationPayload
+                    .isSupportedProtocolVersion(protocolVersion);
+        });
+    }
+
+    @RequiresApi(Build.VERSION_CODES.M)
+    private static final class FocusIconApi23 {
+        private static final int IMAGE_CACHE_MAX_BYTES = 4 * 1024 * 1024;
+        private static final ExecutorService IMAGE_EXECUTOR = createImageExecutor();
+        private static final ConcurrentHashMap<String, CompletableFuture<Bitmap>> IN_FLIGHT =
+                new ConcurrentHashMap<>();
+        private static final LruCache<String, Bitmap> IMAGE_CACHE =
+                new LruCache<String, Bitmap>(IMAGE_CACHE_MAX_BYTES) {
+                    @Override
+                    protected int sizeOf(String key, Bitmap value) {
+                        if (value == null || value.isRecycled()) return 1;
+                        return Math.max(1, value.getAllocationByteCount());
+                    }
+                };
+
+        private FocusIconApi23() {
+        }
+
+        private static ExecutorService createImageExecutor() {
+            AtomicInteger threadNumber = new AtomicInteger();
+            ThreadFactory threadFactory = runnable -> {
+                Thread thread = new Thread(runnable,
+                        "mipush-focus-image-" + threadNumber.incrementAndGet());
+                thread.setPriority(Thread.MIN_PRIORITY);
+                return thread;
+            };
+            ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                    3, 3, 30L, TimeUnit.SECONDS,
+                    new LinkedBlockingQueue<>(30), threadFactory);
+            executor.allowCoreThreadTimeOut(true);
+            return executor;
+        }
+
+        static Bundle downloadPictures(
+                Context context, Map<String, String> pictureUrls) {
+            List<Map.Entry<String, String>> pictures =
+                    new ArrayList<>(pictureUrls.entrySet());
+            List<CompletableFuture<Bitmap>> futures = new ArrayList<>(pictures.size());
+            for (Map.Entry<String, String> picture : pictures) {
+                futures.add(getOrStartDownload(context, picture.getValue()));
+            }
+
+            Bundle result = new Bundle();
+            long deadlineNanos = System.nanoTime()
+                    + TimeUnit.MILLISECONDS.toNanos(
+                            FocusNotificationSafety.IMAGE_ENRICHMENT_BUDGET_MILLIS);
+            for (int i = 0; i < pictures.size(); i++) {
+                Bitmap bitmap = null;
+                long remainingNanos = deadlineNanos - System.nanoTime();
+                if (remainingNanos > 0L) {
+                    try {
+                        bitmap = futures.get(i).get(remainingNanos, TimeUnit.NANOSECONDS);
+                    } catch (ExecutionException | TimeoutException error) {
+                        logger.w("Unable to download focus-notification picture", error);
+                    } catch (InterruptedException error) {
+                        Thread.currentThread().interrupt();
+                    } catch (java.util.concurrent.CancellationException error) {
+                    }
+                }
+                Icon icon = null;
+                if (bitmap != null && !bitmap.isRecycled()) {
+                    try {
+                        icon = Icon.createWithBitmap(bitmap);
+                    } catch (Throwable error) {
+                        logger.w("Unable to create native focus-notification icon", error);
+                    }
+                }
+                // Official XMSF retains the key with a null value on failure.
+                result.putParcelable(pictures.get(i).getKey(), icon);
+            }
+            // Keep the URL keys in the parent focus bundle even when one or
+            // more native icons failed. The URL is part of Xiaomi's original
+            // protocol; a null/omitted native Icon is the documented safe
+            // degradation. Binder/build failures are handled by publish's
+            // single focus-stripping retry, while a slow or bad image never
+            // blocks the standard notification past the caller budget.
+            return result;
+        }
+
+        private static CompletableFuture<Bitmap> getOrStartDownload(
+                Context context, String url) {
+            if (url == null) {
+                return CompletableFuture.completedFuture(null);
+            }
+            Bitmap cached = IMAGE_CACHE.get(url);
+            if (cached != null && !cached.isRecycled()) {
+                return CompletableFuture.completedFuture(cached);
+            }
+
+            CompletableFuture<Bitmap> created = new CompletableFuture<>();
+            CompletableFuture<Bitmap> existing = IN_FLIGHT.putIfAbsent(url, created);
+            if (existing != null) return existing;
+
+            try {
+                IMAGE_EXECUTOR.execute(() -> {
+                    try {
+                        Bitmap bitmap = downloadPicture(context, url);
+                        if (bitmap != null && !bitmap.isRecycled()
+                                && url.regionMatches(true, 0, "https://", 0, 8)) {
+                            IMAGE_CACHE.put(url, bitmap);
+                        }
+                        created.complete(bitmap);
+                    } catch (Throwable error) {
+                        logger.w("Unable to decode focus-notification picture", error);
+                        created.complete(null);
+                    } finally {
+                        IN_FLIGHT.remove(url, created);
+                    }
+                });
+            } catch (RejectedExecutionException error) {
+                IN_FLIGHT.remove(url, created);
+                created.complete(null);
+            }
+            return created;
+        }
+
+        @Nullable
+        private static Bitmap downloadPicture(Context context, String url) {
+            // Ask the bounded reader for one extra byte so exactly 100 KiB remains
+            // valid while a larger response is rejected.
+            MyNotificationIconHelper.GetIconResult result;
+            if (url != null && (url.regionMatches(true, 0, "content://", 0, 10)
+                    || url.regionMatches(true, 0, "android.resource://", 0, 19))) {
+                result = MyNotificationIconHelper.getFocusIconFromUri(context, url,
+                        CustomConfiguration.FOCUS_PICTURE_MAX_BYTES);
+            } else {
+                result = MyNotificationIconHelper.getFocusIconFromUrl(context, url,
+                        CustomConfiguration.FOCUS_PICTURE_MAX_BYTES + 1);
+            }
+            if (result == null || result.bitmap == null
+                    || !CustomConfiguration.FocusNotificationPayload
+                    .isPictureSizeAllowed(result.downloadSize)) {
+                return null;
+            }
+            return result.bitmap;
+        }
     }
 
     @Nullable
@@ -217,8 +769,10 @@ public class NotificationController {
                 getNotificationTag(container), notificationId);
 
         if (clearGroup) {
-            getNotificationManagerEx().cancel(container.getPackageName(),
-                    getNotificationTag(container), notificationGroup.hashCode());
+            if (notificationGroup != null) {
+                getNotificationManagerEx().cancel(container.getPackageName(),
+                        getNotificationTag(container), notificationGroup.hashCode());
+            }
             return;
         }
 
@@ -336,9 +890,31 @@ public class NotificationController {
 
 
     public static void test(Context context, String packageName, String title, String description) {
-        NotificationChannelManager.registerChannelIfNeeded(context, new PushMetaInfo(), packageName);
+        test(context, packageName, title, description, new PushMetaInfo(), 10001);
+    }
 
-        int id = (int) (System.currentTimeMillis() / 1000L);
+    public static void testFocus(Context context, String packageName, String title,
+                                 String description) {
+        PushMetaInfo metaInfo = new PushMetaInfo();
+        Map<String, String> extras = new HashMap<>();
+        try {
+            org.json.JSONObject json = new org.json.JSONObject();
+            json.put("ticker", "MiPush Framework");
+            json.put("title", title);
+            json.put("description", description);
+            extras.put(FOCUS_PARAM, json.toString());
+        } catch (org.json.JSONException e) {
+            logger.e("Failed to construct focus JSON", e);
+        }
+        extras.put("miui.focus.pic_0",
+                "https://raw.githubusercontent.com/SherlockChiang/MiPushFramework/7e2eb27ef86a4ea29d4791a82dd5a557b7f14b62/art/ic_launcher-web.png");
+        metaInfo.setExtra(extras);
+        test(context, packageName, title, description, metaInfo, 10002);
+    }
+
+    private static void test(Context context, String packageName, String title,
+                             String description, PushMetaInfo metaInfo, int notificationId) {
+        NotificationChannelManager.registerChannelIfNeeded(context, metaInfo, packageName);
 
         NotificationCompat.Builder localBuilder = new NotificationCompat.Builder(context);
 
@@ -362,7 +938,7 @@ public class NotificationController {
 
         localBuilder.setContentIntent(notifyPendingIntent);
 
-        NotificationController.publish(context, new PushMetaInfo(), id, packageName, localBuilder);
+        NotificationController.publish(context, metaInfo, notificationId, packageName, localBuilder);
     }
 
 }

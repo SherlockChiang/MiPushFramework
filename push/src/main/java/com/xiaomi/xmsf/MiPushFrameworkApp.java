@@ -13,6 +13,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Build;
+import android.os.SystemClock;
 
 import androidx.core.app.NotificationChannelCompat;
 import androidx.core.app.NotificationChannelGroupCompat;
@@ -26,6 +27,7 @@ import com.nihility.utils.PrivilegeElevator;
 import com.oasisfeng.condom.CondomOptions;
 import com.oasisfeng.condom.CondomProcess;
 import com.xiaomi.xmsf.push.control.PushControllerUtils;
+import com.xiaomi.xmsf.push.control.StartupWorkPolicy;
 import com.xiaomi.xmsf.push.control.XMOutbound;
 import com.xiaomi.xmsf.push.service.MiuiPushActivateService;
 import com.xiaomi.xmsf.utils.LogUtils;
@@ -63,13 +65,16 @@ public class MiPushFrameworkApp extends Application {
 
         NotificationManagerEx.init(getApplicationContext());
 
-
         installCondom();
 
-        PushControllerUtils.setAllEnable(true, this);
-
-        awakePushActivateServiceOnMainProc(PushControllerUtils.wrapContext(this));
-        requestDozeWhiteList();
+        // Follow the master switch so opening a disabled installation does not wake
+        // scanners or post keep-alive prompts.
+        if (StartupWorkPolicy.shouldRunAppStartup(
+                isAppMainProc(this),
+                PushControllerUtils.isPrefsEnable(this))) {
+            awakePushActivateService(PushControllerUtils.wrapContext(this));
+            requestDozeWhiteList();
+        }
     }
 
     private void requestDozeWhiteList() {
@@ -83,16 +88,15 @@ public class MiPushFrameworkApp extends Application {
         }
     }
 
-    private void awakePushActivateServiceOnMainProc(Context context) {
-        if (isAppMainProc(this)) {
-            long currentTimeMillis = System.currentTimeMillis();
-            long elapsedMs = currentTimeMillis - getLastStartupTime();
-            int fiveMinutesMs = 300_000;
-            if (elapsedMs > fiveMinutesMs || elapsedMs < 0) {
-                setStartupTime(currentTimeMillis);
-                MiuiPushActivateService.awakePushActivateService(
-                        context, "com.xiaomi.xmsf.push.SCAN");
-            }
+    private void awakePushActivateService(Context context) {
+        long nowElapsed = SystemClock.elapsedRealtime();
+        long previousElapsed = getLastStartupElapsed();
+        int fiveMinutesMs = 300_000;
+        if (StartupWorkPolicy.shouldRunThrottled(
+                previousElapsed, nowElapsed, fiveMinutesMs)) {
+            setStartupElapsed(nowElapsed);
+            MiuiPushActivateService.awakePushActivateService(
+                    context, "com.xiaomi.xmsf.push.SCAN");
         }
     }
 
@@ -113,9 +117,10 @@ public class MiPushFrameworkApp extends Application {
         createWarnChannel(manager);
 
         Intent removeDozeActivityIntent = new Intent().setComponent(
-                new ComponentName(Constants.SERVICE_APP_NAME, Constants.REMOVE_DOZE_COMPONENT_NAME));
+                new ComponentName(getPackageName(), RemoveDozeActivity.class.getName()));
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0,
-                removeDozeActivityIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+                removeDozeActivityIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_WARN)
                 .setContentInfo(getString(R.string.wizard_title_doze_whitelist))
                 .setContentTitle(getString(R.string.wizard_title_doze_whitelist))
@@ -133,11 +138,11 @@ public class MiPushFrameworkApp extends Application {
     private void createWarnChannel(NotificationManagerCompat manager) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannelCompat.Builder channel = new NotificationChannelCompat
-                    .Builder(CHANNEL_WARN, NotificationManager.IMPORTANCE_HIGH)
-                    .setName(getString(R.string.wizard_title_doze_whitelist));
+                .Builder(CHANNEL_WARN, NotificationManager.IMPORTANCE_HIGH)
+                .setName(getString(R.string.wizard_title_doze_whitelist));
 
             NotificationChannelGroupCompat notificationChannelGroup =
-                    new NotificationChannelGroupCompat.Builder(CHANNEL_WARN).setName(CHANNEL_WARN).build();
+                new NotificationChannelGroupCompat.Builder(CHANNEL_WARN).setName(CHANNEL_WARN).build();
             manager.createNotificationChannelGroup(notificationChannelGroup);
             channel.setGroup(notificationChannelGroup.getId());
             manager.createNotificationChannel(channel.build());
@@ -145,12 +150,15 @@ public class MiPushFrameworkApp extends Application {
     }
 
 
-    private long getLastStartupTime() {
-        return getDefaultPreferences().getLong("xmsf_startup", 0);
+    private long getLastStartupElapsed() {
+        return getDefaultPreferences().getLong("xmsf_startup_elapsed", 0);
     }
 
-    private boolean setStartupTime(long j) {
-        return getDefaultPreferences().edit().putLong("xmsf_startup", j).commit();
+    private void setStartupElapsed(long elapsedRealtime) {
+        getDefaultPreferences().edit()
+                .putLong("xmsf_startup_elapsed", elapsedRealtime)
+                .remove("xmsf_startup")
+                .apply();
     }
 
     private SharedPreferences getDefaultPreferences() {

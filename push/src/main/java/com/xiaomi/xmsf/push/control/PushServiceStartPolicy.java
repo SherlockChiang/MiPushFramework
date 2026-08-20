@@ -1,0 +1,36 @@
+package com.xiaomi.xmsf.push.control;
+
+/**
+ * Pure policy class to evaluate push service starting decisions without Android UI dependencies.
+ */
+public class PushServiceStartPolicy {
+
+    public enum Action {
+        SKIP,
+        START_SERVICE,
+        START_FOREGROUND
+    }
+
+    public static Action evaluate(
+            boolean isMasterEnabled,
+            boolean isServiceRunning,
+            boolean isUserInitiated,
+            boolean isPersistentForegroundEnabled,
+            boolean isPlatformAllowed) {
+        if (!isMasterEnabled) {
+            return Action.SKIP;
+        }
+        if (isServiceRunning) {
+            return Action.START_SERVICE;
+        }
+        if (isUserInitiated) {
+            return Action.START_SERVICE;
+        }
+        if (!isPlatformAllowed) {
+            return Action.SKIP;
+        }
+        return isPersistentForegroundEnabled
+                ? Action.START_FOREGROUND
+                : Action.START_SERVICE;
+    }
+}

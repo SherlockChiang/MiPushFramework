@@ -21,6 +21,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -35,8 +36,8 @@ import top.trumeet.common.utils.Utils;
 public class ConfigurationsLoader {
     private static final Logger logger = XLog.tag(ConfigurationsLoader.class.getSimpleName()).build();
 
-    private String version;
-    private Map<String, List<Object>> packageConfigs = new HashMap<>();
+    private volatile PublishedConfigurationState publishedState =
+            PublishedConfigurationState.notConfigured();
 
     private Context mContext = null;
     private Uri mTreeUri = null;
@@ -48,21 +49,93 @@ public class ConfigurationsLoader {
     }
 
     public Map<String, List<Object>> getConfigs() {
-        return packageConfigs;
+        return publishedState.packageConfigs;
     }
 
-    public boolean init(Context context, Uri treeUri) {
-        mLastLoadTime = System.currentTimeMillis();
-        packageConfigs.clear();
-        do {
-            if (context == null || treeUri == null) {
-                break;
-            }
-            List<Pair<DocumentFile, JSONException>> exceptions = new ArrayList<>();
-            List<DocumentFile> loadedFiles = new ArrayList<>();
-            parseDirectory(context, treeUri, exceptions, loadedFiles);
+    public ConfigurationDiagnosticsSnapshot getDiagnosticsSnapshot() {
+        return publishedState.diagnosticsSnapshot;
+    }
 
-            if (!loadedFiles.isEmpty() && Global.ConfigCenter().isShowConfigurationListOnLoaded(context)) {
+    /**
+     * Returns a deterministic snapshot of configuration references that do not resolve to a
+     * currently loaded config key. Diagnostics contain config metadata only; notification data is
+     * never inspected or retained.
+     */
+    public List<ConfigurationReferenceDiagnostics.UnresolvedReference> getUnresolvedReferences() {
+        return getDiagnosticsSnapshot().getUnresolvedReferences();
+    }
+
+    public synchronized boolean init(Context context, Uri treeUri) {
+        mLastLoadTime = System.currentTimeMillis();
+        if (context == null || treeUri == null) {
+            clearDirectoryTracking();
+            publishedState = PublishedConfigurationState.notConfigured();
+            return false;
+        }
+
+        mContext = context;
+        mTreeUri = treeUri;
+        mDocumentFile = null;
+
+        DocumentFile documentFile;
+        try {
+            documentFile = DocumentFile.fromTreeUri(context, treeUri);
+            if (documentFile == null
+                    || !documentFile.exists()
+                    || !documentFile.isDirectory()
+                    || !documentFile.canRead()) {
+                logger.e("configuration_directory_load_failed stage=[validate_directory]");
+                publishedState = PublishedConfigurationState.failed();
+                return false;
+            }
+        } catch (RuntimeException exception) {
+            logDirectoryFailure("open_directory", exception);
+            publishedState = PublishedConfigurationState.failed();
+            return false;
+        }
+
+        mDocumentFile = documentFile;
+        MutableConfigurationState candidate = MutableConfigurationState.empty();
+        List<Pair<DocumentFile, JSONException>> exceptions = new ArrayList<>();
+        List<DocumentFile> loadedFiles = new ArrayList<>();
+        boolean directoryParsed;
+        try {
+            directoryParsed = parseDirectory(
+                    context, treeUri, documentFile, candidate, exceptions, loadedFiles);
+        } catch (RuntimeException exception) {
+            logDirectoryFailure("parse_directory", exception);
+            directoryParsed = false;
+        }
+
+        boolean successful = directoryParsed && exceptions.isEmpty();
+        if (successful) {
+            publish(candidate);
+        } else {
+            publishedState = PublishedConfigurationState.failed();
+        }
+
+        reportDirectoryLoadResult(context, loadedFiles, exceptions);
+        return successful;
+    }
+
+    private void clearDirectoryTracking() {
+        mContext = null;
+        mTreeUri = null;
+        mDocumentFile = null;
+    }
+
+    private static void logDirectoryFailure(String stage, RuntimeException exception) {
+        logger.e("configuration_directory_load_failed stage=[%s] exception_type=[%s]",
+                stage, exception.getClass().getName());
+    }
+
+    private static void reportDirectoryLoadResult(
+            Context context,
+            List<DocumentFile> loadedFiles,
+            List<Pair<DocumentFile, JSONException>> exceptions) {
+        try {
+            if (!loadedFiles.isEmpty()
+                    && Global.ConfigCenter().isShowConfigurationListOnLoaded(context)) {
                 StringBuilder loadedList = new StringBuilder("loaded configuration list:");
                 for (DocumentFile file : loadedFiles) {
                     loadedList.append('\n');
@@ -70,17 +143,18 @@ public class ConfigurationsLoader {
                 }
                 Utils.makeText(context, loadedList, Toast.LENGTH_SHORT);
             }
-            if (!exceptions.isEmpty()) {
-                for (Pair<DocumentFile, JSONException> pair : exceptions) {
-                    StringBuilder errmsg = getJsonExceptionMessage(context, pair);
-                    logger.e(errmsg);
-                    Utils.makeText(context, errmsg.toString(), Toast.LENGTH_LONG);
-                }
-                break;
+        } catch (RuntimeException exception) {
+            logDirectoryFailure("report_loaded_files", exception);
+        }
+        for (Pair<DocumentFile, JSONException> pair : exceptions) {
+            try {
+                StringBuilder errmsg = getJsonExceptionMessage(context, pair);
+                logger.e(errmsg);
+                Utils.makeText(context, errmsg.toString(), Toast.LENGTH_LONG);
+            } catch (RuntimeException exception) {
+                logDirectoryFailure("report_json_error", exception);
             }
-            return true;
-        } while (false);
-        return false;
+        }
     }
 
     @NonNull
@@ -118,45 +192,138 @@ public class ConfigurationsLoader {
         return errmsg;
     }
 
-    private boolean parseDirectory(Context context, Uri treeUri, List<Pair<DocumentFile, JSONException>> exceptions, List<DocumentFile> loadedFiles) {
-        DocumentFile documentFile = DocumentFile.fromTreeUri(context, treeUri);
-        if (documentFile == null) {
-            return true;
-        }
-        mContext = context;
-        mTreeUri = treeUri;
-        mDocumentFile = documentFile;
+    private boolean parseDirectory(
+            Context context,
+            Uri treeUri,
+            DocumentFile documentFile,
+            MutableConfigurationState candidate,
+            List<Pair<DocumentFile, JSONException>> exceptions,
+            List<DocumentFile> loadedFiles) {
         logger.i("parseDirectory uri: [%s]", treeUri.getPath());
-        DocumentFile[] files = documentFile.listFiles();
+        DocumentFile[] files;
+        try {
+            files = documentFile.listFiles();
+        } catch (RuntimeException exception) {
+            logDirectoryFailure("list_files", exception);
+            return false;
+        }
+        if (files == null) {
+            logger.e("configuration_directory_load_failed stage=[list_files_null]");
+            return false;
+        }
         for (DocumentFile file : files) {
-            logger.i("file: [%s], type: [%s]", file.getName(), file.getType());
-            if (!file.getName().toLowerCase().endsWith(".json")) {
+            String fileName = file.getName();
+            logger.i("file: [%s], type: [%s]", fileName, file.getType());
+            if (fileName == null || !fileName.toLowerCase().endsWith(".json")) {
                 continue;
             }
-            String json = readTextFromUri(context, file.getUri());
+            String json;
             try {
-                parse(json);
+                json = readConfigurationText(context, file.getUri());
+            } catch (ConfigurationReadException exception) {
+                logger.e(
+                        "configuration_file_load_failed file=[%s] exception_type=[%s]",
+                        fileName, exception.exceptionType);
+                return false;
+            }
+            try {
+                parse(json, fileName, candidate);
                 loadedFiles.add(file);
             } catch (JSONException e) {
                 exceptions.add(new Pair<>(file, e));
             }
         }
-        return false;
+        return exceptions.isEmpty();
+    }
+
+    private static String readConfigurationText(Context context, Uri uri)
+            throws ConfigurationReadException {
+        StringBuilder stringBuilder = new StringBuilder();
+        try (InputStream inputStream = context.getContentResolver().openInputStream(uri);
+             BufferedReader reader = new BufferedReader(
+                     new InputStreamReader(Objects.requireNonNull(inputStream)))) {
+            char[] buffer = new char[1024];
+            int len;
+            while ((len = reader.read(buffer)) != -1) {
+                stringBuilder.append(buffer, 0, len);
+            }
+            return stringBuilder.toString();
+        } catch (Exception exception) {
+            exception.printStackTrace();
+            Utils.makeText(context, exception.toString(), Toast.LENGTH_LONG);
+            throw new ConfigurationReadException(exception.getClass().getName());
+        }
+    }
+
+    private static final class ConfigurationReadException extends Exception {
+        private final String exceptionType;
+
+        private ConfigurationReadException(String exceptionType) {
+            super(null, null, false, false);
+            this.exceptionType = exceptionType;
+        }
     }
 
     public void load(String json) throws JSONException {
-        parse(json);
+        load("<memory>", json);
     }
 
-    private void parse(String json) throws JSONException {
+    /** Loads an in-memory configuration while retaining a caller-provided diagnostic source name. */
+    public synchronized void load(String sourceName, String json) throws JSONException {
+        MutableConfigurationState candidate =
+                MutableConfigurationState.copyOf(publishedState);
+        parse(json, sourceName, candidate);
+        publish(candidate);
+    }
+
+    private void parse(
+            String json, String sourceName, MutableConfigurationState candidate)
+            throws JSONException {
         JSONObject jsonObject = new JSONObject(json);
-        version = jsonObject.getString("version");
+        candidate.version = jsonObject.getString("version");
         JSONObject packageConfigsObj = jsonObject.getJSONObject("configs");
         Iterator<String> packageNames = packageConfigsObj.keys();
         while (packageNames.hasNext()) {
             String packageName = packageNames.next();
             JSONArray configsObj = packageConfigsObj.getJSONArray(packageName);
-            packageConfigs.put(packageName, parseConfigs(configsObj));
+            candidate.packageConfigs.put(packageName, parseConfigs(configsObj));
+            candidate.referenceSites.put(
+                    packageName, findReferenceSites(sourceName, packageName, configsObj));
+        }
+    }
+
+    @NonNull
+    private static List<ConfigurationReferenceDiagnostics.UnresolvedReference> findReferenceSites(
+            String sourceName, String ownerKey, JSONArray configsObj) throws JSONException {
+        List<ConfigurationReferenceDiagnostics.UnresolvedReference> sites = new ArrayList<>();
+        for (int i = 0; i < configsObj.length(); ++i) {
+            Object config = configsObj.get(i);
+            if (config instanceof String) {
+                sites.add(ConfigurationReferenceDiagnostics.referenceSite(
+                        sourceName, ownerKey, (String) config));
+            }
+        }
+        return sites;
+    }
+
+    private void publish(MutableConfigurationState candidate) {
+        List<ConfigurationReferenceDiagnostics.UnresolvedReference> sites = new ArrayList<>();
+        for (List<ConfigurationReferenceDiagnostics.UnresolvedReference> ownerSites
+                : candidate.referenceSites.values()) {
+            sites.addAll(ownerSites);
+        }
+        List<ConfigurationReferenceDiagnostics.UnresolvedReference> unresolvedReferences =
+                ConfigurationReferenceDiagnostics.resolve(
+                        candidate.packageConfigs.keySet(), sites);
+        ConfigurationDiagnosticsSnapshot diagnosticsSnapshot =
+                ConfigurationDiagnosticsSnapshot.ready(unresolvedReferences);
+        publishedState = PublishedConfigurationState.ready(
+                candidate.version, candidate.packageConfigs, candidate.referenceSites,
+                diagnosticsSnapshot);
+        for (ConfigurationReferenceDiagnostics.UnresolvedReference diagnostic
+                : unresolvedReferences) {
+            logger.w("unresolved_configuration_reference source=[%s] owner=[%s] reference=[%s]",
+                    diagnostic.getSourceName(), diagnostic.getOwnerKey(), diagnostic.getReference());
         }
     }
 
@@ -205,12 +372,108 @@ public class ConfigurationsLoader {
         return config;
     }
 
-    public void reInitIfDirectoryUpdated() {
+    public synchronized void reInitIfDirectoryUpdated() {
         if (mContext == null || mTreeUri == null || mDocumentFile == null) {
             return;
         }
         if (mDocumentFile.lastModified() > mLastLoadTime) {
             init(mContext, mTreeUri);
+        }
+    }
+
+    private static final class MutableConfigurationState {
+        private String version;
+        private final Map<String, List<Object>> packageConfigs;
+        private final Map<String, List<ConfigurationReferenceDiagnostics.UnresolvedReference>>
+                referenceSites;
+
+        private MutableConfigurationState(
+                String version,
+                Map<String, List<Object>> packageConfigs,
+                Map<String, List<ConfigurationReferenceDiagnostics.UnresolvedReference>>
+                        referenceSites) {
+            this.version = version;
+            this.packageConfigs = packageConfigs;
+            this.referenceSites = referenceSites;
+        }
+
+        private static MutableConfigurationState empty() {
+            return new MutableConfigurationState(null, new HashMap<>(), new HashMap<>());
+        }
+
+        private static MutableConfigurationState copyOf(PublishedConfigurationState state) {
+            return new MutableConfigurationState(
+                    state.version,
+                    new HashMap<>(state.packageConfigs),
+                    new HashMap<>(state.referenceSites));
+        }
+    }
+
+    private static final class PublishedConfigurationState {
+        private final String version;
+        private final Map<String, List<Object>> packageConfigs;
+        private final Map<String, List<ConfigurationReferenceDiagnostics.UnresolvedReference>>
+                referenceSites;
+        private final ConfigurationDiagnosticsSnapshot diagnosticsSnapshot;
+
+        private PublishedConfigurationState(
+                String version,
+                Map<String, List<Object>> packageConfigs,
+                Map<String, List<ConfigurationReferenceDiagnostics.UnresolvedReference>>
+                        referenceSites,
+                ConfigurationDiagnosticsSnapshot diagnosticsSnapshot) {
+            this.version = version;
+            this.packageConfigs = immutableConfigMap(packageConfigs);
+            this.referenceSites = immutableReferenceMap(referenceSites);
+            this.diagnosticsSnapshot = diagnosticsSnapshot;
+        }
+
+        private static Map<String, List<Object>> immutableConfigMap(
+                Map<String, List<Object>> source) {
+            Map<String, List<Object>> copy = new HashMap<>();
+            for (Map.Entry<String, List<Object>> entry : source.entrySet()) {
+                copy.put(entry.getKey(), Collections.unmodifiableList(
+                        new ArrayList<>(entry.getValue())));
+            }
+            return Collections.unmodifiableMap(copy);
+        }
+
+        private static Map<String, List<ConfigurationReferenceDiagnostics.UnresolvedReference>>
+        immutableReferenceMap(
+                Map<String, List<ConfigurationReferenceDiagnostics.UnresolvedReference>> source) {
+            Map<String, List<ConfigurationReferenceDiagnostics.UnresolvedReference>> copy =
+                    new HashMap<>();
+            for (Map.Entry<String,
+                    List<ConfigurationReferenceDiagnostics.UnresolvedReference>> entry
+                    : source.entrySet()) {
+                copy.put(entry.getKey(), Collections.unmodifiableList(
+                        new ArrayList<>(entry.getValue())));
+            }
+            return Collections.unmodifiableMap(copy);
+        }
+
+        private static PublishedConfigurationState notConfigured() {
+            return empty(ConfigurationDiagnosticsSnapshot.notConfigured());
+        }
+
+        private static PublishedConfigurationState failed() {
+            return empty(ConfigurationDiagnosticsSnapshot.failed());
+        }
+
+        private static PublishedConfigurationState empty(
+                ConfigurationDiagnosticsSnapshot diagnosticsSnapshot) {
+            return new PublishedConfigurationState(
+                    null, Collections.emptyMap(), Collections.emptyMap(), diagnosticsSnapshot);
+        }
+
+        private static PublishedConfigurationState ready(
+                String version,
+                Map<String, List<Object>> packageConfigs,
+                Map<String, List<ConfigurationReferenceDiagnostics.UnresolvedReference>>
+                        referenceSites,
+                ConfigurationDiagnosticsSnapshot diagnosticsSnapshot) {
+            return new PublishedConfigurationState(
+                    version, packageConfigs, referenceSites, diagnosticsSnapshot);
         }
     }
 

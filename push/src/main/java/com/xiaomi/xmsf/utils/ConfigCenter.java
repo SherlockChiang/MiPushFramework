@@ -21,6 +21,9 @@ import top.trumeet.common.utils.Utils;
  */
 public class ConfigCenter {
 
+    public static final String KEY_START_FOREGROUND_SERVICE = "StartForegroundService";
+    public static final String KEY_FLOATING_BOTTOM_NAVIGATION = "FloatingBottomNavigation";
+
     public ConfigCenter() {
     }
 
@@ -76,7 +79,25 @@ public class ConfigCenter {
     }
 
     public boolean isStartForegroundService() {
-        return getSharedPreferences(Utils.getApplication()).getBoolean("StartForegroundService", false);
+        return isStartForegroundService(Utils.getApplication());
+    }
+
+    public boolean isStartForegroundService(Context ctx) {
+        return getSharedPreferences(ctx).getBoolean(KEY_START_FOREGROUND_SERVICE, false);
+    }
+
+    public boolean isFloatingBottomNavigation(Context ctx) {
+        return getSharedPreferences(ctx).getBoolean(KEY_FLOATING_BOTTOM_NAVIGATION, true);
+    }
+
+    public boolean isFloatingBottomNavigation() {
+        return isFloatingBottomNavigation(Utils.getApplication());
+    }
+
+    public boolean setFloatingBottomNavigation(Context ctx, boolean enabled) {
+        return getSharedPreferences(ctx).edit()
+                .putBoolean(KEY_FLOATING_BOTTOM_NAVIGATION, enabled)
+                .commit();
     }
 
     public void loadConfigurations(Context context) {

@@ -2,12 +2,13 @@ package com.nihility.service;
 
 import android.content.Intent;
 
-import java.util.ArrayList;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class XMPushServiceListenerNotifier implements XMPushServiceListener {
-    private final ArrayList<XMPushServiceListener> listeners = new ArrayList<>();
+    private final CopyOnWriteArrayList<XMPushServiceListener> listeners =
+            new CopyOnWriteArrayList<>();
 
-    public void addListener(XMPushServiceListener listener) {
+    public final void addListener(XMPushServiceListener listener) {
         listeners.add(listener);
     }
 
@@ -20,8 +21,32 @@ public class XMPushServiceListenerNotifier implements XMPushServiceListener {
 
     @Override
     public void destroy() {
-        for (XMPushServiceListener listener : listeners) {
-            listener.destroy();
+        RuntimeException firstRuntimeFailure = null;
+        Error firstError = null;
+        try {
+            for (XMPushServiceListener listener : listeners) {
+                try {
+                    listener.destroy();
+                } catch (RuntimeException e) {
+                    if (firstRuntimeFailure == null) {
+                        firstRuntimeFailure = e;
+                    }
+                } catch (Error e) {
+                    if (firstError == null) {
+                        firstError = e;
+                    }
+                }
+            }
+        } finally {
+            // Aspect instances can outlive a stopped Service. Drop listeners so they cannot
+            // retain the Service and its receiver/notification helpers until process death.
+            listeners.clear();
+        }
+        if (firstError != null) {
+            throw firstError;
+        }
+        if (firstRuntimeFailure != null) {
+            throw firstRuntimeFailure;
         }
     }
 

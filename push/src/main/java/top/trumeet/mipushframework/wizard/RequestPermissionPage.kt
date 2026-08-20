@@ -19,13 +19,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
-import androidx.compose.material3.BottomAppBar
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBarDefaults
-import androidx.compose.material3.Text
-import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.MutableState
@@ -33,6 +26,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -48,6 +42,11 @@ import top.trumeet.mipushframework.wizard.permission.PermissionInfo
 import top.trumeet.mipushframework.wizard.permission.RequestIgnoreBatteryOptimizationsPermissionInfo
 import top.trumeet.mipushframework.wizard.permission.UsageStatsPermissionInfo
 import top.trumeet.ui.theme.Theme
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.Surface
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 class RequestPermissionPage : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -55,9 +54,7 @@ class RequestPermissionPage : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
             Theme {
-                window.navigationBarColor = MaterialTheme.colorScheme.surfaceColorAtElevation(
-                    NavigationBarDefaults.Elevation
-                ).toArgb()
+                window.navigationBarColor = MiuixTheme.colorScheme.surfaceContainer.toArgb()
                 PermissionMainPage()
             }
         }
@@ -155,7 +152,7 @@ private fun Description(description: String) {
     Row {
         MarkdownView(
             description,
-            textSize = MaterialTheme.typography.bodyLarge.fontSize.value,
+            textSize = MiuixTheme.textStyles.body1.fontSize.value,
             modifier = Modifier
                 .align(Alignment.Bottom)
                 .padding(16.dp)
@@ -167,14 +164,14 @@ private fun Description(description: String) {
 private fun Title(title: String) {
     Row(
         Modifier
-            .background(MaterialTheme.colorScheme.primaryContainer)
+            .background(MiuixTheme.colorScheme.primaryContainer)
             .fillMaxWidth()
             .fillMaxHeight(0.4f)
     ) {
         Text(
             title,
-            style = MaterialTheme.typography.headlineLarge,
-            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            style = MiuixTheme.textStyles.title1,
+            color = MiuixTheme.colorScheme.onPrimaryContainer,
             modifier = Modifier
                 .align(Alignment.Bottom)
                 .padding(16.dp)
@@ -186,7 +183,10 @@ private fun Title(title: String) {
 private fun BottomBar(
     currentItem: MutableState<Int>, permissions: List<PermissionInfo>
 ) {
-    BottomAppBar(modifier = Modifier.height(56.dp)) {
+    Surface(
+        modifier = Modifier.height(64.dp),
+        color = MiuixTheme.colorScheme.surfaceContainer,
+    ) {
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -194,7 +194,9 @@ private fun BottomBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(
-                onClick = { currentItem.value-- }, enabled = currentItem.value > 0
+                onClick = { currentItem.value-- },
+                enabled = currentItem.value > 0,
+                backgroundColor = Color.Transparent,
             ) {
                 Icon(
                     imageVector = Icons.Default.ArrowBack, contentDescription = "上一项"
@@ -202,13 +204,16 @@ private fun BottomBar(
             }
 
             val operator = permissions[currentItem.value].permissionOperator
-            IconButton(onClick = {
+            IconButton(
+                onClick = {
                 if (operator.isPermissionGranted()) {
                     currentItem.value++
                 } else {
                     operator.requestPermission()
                 }
-            }) {
+                },
+                backgroundColor = Color.Transparent,
+            ) {
                 Icon(
                     imageVector = Icons.Default.ArrowForward, contentDescription = "下一项"
                 )

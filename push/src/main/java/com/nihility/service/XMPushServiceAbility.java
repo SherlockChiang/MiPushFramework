@@ -16,15 +16,56 @@ import com.xiaomi.push.service.PullAllApplicationDataFromServerJob;
 import com.xiaomi.push.service.XMPushService;
 import com.xiaomi.push.service.XMPushServiceMessenger;
 import com.xiaomi.xmsf.push.control.XMOutbound;
+import com.xiaomi.xmsf.push.control.PushControllerUtils;
 
 public class XMPushServiceAbility extends XMPushServiceListenerNotifier {
-    public static XMPushService xmPushService;
+    /**
+     * Compatibility handle used by the event replay tool. It is populated only while the
+     * service is alive and cleared deterministically from destroy(), so it cannot retain a
+     * stopped Service for the rest of the process lifetime.
+     */
+    public static volatile XMPushService xmPushService;
+    private XMPushService pushService;
 
     public XMPushServiceAbility(XMPushService pushService) {
-        xmPushService = pushService;
+        this.pushService = pushService;
         Global.RegistrationRecorder().initContext(pushService);
         condomContext(pushService);
         initListeners(pushService);
+    }
+
+    @Override
+    public void created() {
+        XMPushService service = pushService;
+        try {
+            super.created();
+            xmPushService = service;
+            PushControllerUtils.onPushServiceCreated();
+        } catch (RuntimeException | Error e) {
+            try {
+                super.destroy();
+            } catch (RuntimeException | Error cleanupError) {
+                e.addSuppressed(cleanupError);
+            }
+            Global.RegistrationRecorder().clearContext();
+            pushService = null;
+            throw e;
+        }
+    }
+
+    @Override
+    public void destroy() {
+        XMPushService service = pushService;
+        try {
+            super.destroy();
+        } finally {
+            if (xmPushService == service) {
+                xmPushService = null;
+            }
+            Global.RegistrationRecorder().clearContext();
+            pushService = null;
+            PushControllerUtils.onPushServiceDestroyed();
+        }
     }
 
 

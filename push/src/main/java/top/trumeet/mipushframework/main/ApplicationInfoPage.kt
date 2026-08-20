@@ -18,18 +18,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBarDefaults
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,13 +32,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
@@ -57,7 +55,28 @@ import top.trumeet.mipush.provider.db.RegisteredApplicationDb
 import top.trumeet.mipush.provider.entities.RegisteredApplication
 import top.trumeet.mipush.provider.entities.RegisteredApplication.RegisteredType
 import top.trumeet.mipushframework.component.MarkdownView
+import top.trumeet.mipushframework.component.MiuixActionButton
+import top.trumeet.mipushframework.component.MiuixActionIconButton
+import top.trumeet.mipushframework.component.MiuixPageScaffold
 import top.trumeet.ui.theme.Theme
+import top.yukonga.miuix.kmp.basic.Button
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Surface
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+
+internal enum class RegistrationAction {
+    REGISTER,
+    REREGISTER,
+}
+
+internal fun registrationActionFor(registeredType: Int): RegistrationAction? =
+    when (registeredType) {
+        RegisteredType.NotRegistered -> RegistrationAction.REGISTER
+        RegisteredType.Unregistered -> RegistrationAction.REREGISTER
+        else -> null
+    }
 
 class ApplicationInfoPage : ComponentActivity() {
     companion object {
@@ -77,11 +96,9 @@ class ApplicationInfoPage : ComponentActivity() {
         init(getRegisteredApplication()!!)
         setContent {
             Theme {
-                window.navigationBarColor = MaterialTheme.colorScheme.surfaceColorAtElevation(
-                    NavigationBarDefaults.Elevation
-                ).toArgb()
+                window.navigationBarColor = MiuixTheme.colorScheme.surfaceContainer.toArgb()
+                SettingsApp()
             }
-            SettingsApp()
         }
     }
 
@@ -113,12 +130,13 @@ class ApplicationInfoPage : ComponentActivity() {
                 )
         }
 
-        Theme {
+        MiuixPageScaffold(modifier = Modifier.fillMaxSize()) { paddingValues ->
             Surface(
                 modifier = Modifier
                     .fillMaxSize()
+                    .padding(paddingValues)
                     .verticalScroll(rememberScrollState()),
-                color = MaterialTheme.colorScheme.background
+                color = MiuixTheme.colorScheme.background
             ) {
                 SettingsScreen()
             }
@@ -139,44 +157,64 @@ class ApplicationInfoPage : ComponentActivity() {
     fun ApplicationInfoHeader() {
         val context = LocalContext.current
         val isPreview = LocalInspectionMode.current
-        val drawable = if (isPreview)
-            AppCompatResources.getDrawable(context, android.R.mipmap.sym_def_app_icon)!!
-        else applicationInfo.getIcon(context)
-        val icon = drawable.toBitmap().asImageBitmap()
-        Row(
-            modifier = Modifier.padding(10.dp),
-            verticalAlignment = Alignment.CenterVertically
+        val density = LocalDensity.current
+        val icon = remember(applicationInfo.packageName, density) {
+            val drawable = if (isPreview)
+                AppCompatResources.getDrawable(context, android.R.mipmap.sym_def_app_icon)!!
+            else applicationInfo.getIcon(context)
+            val iconSizePx = with(density) { 40.dp.roundToPx() }
+            drawable.toBitmap(iconSizePx, iconSizePx).asImageBitmap()
+        }
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
-            IconButton({
-                RegistrationHelper(
-                    context,
-                    applicationInfo.packageName
-                ).deleteRegistrationInfoAndRetryForceRegister()
-            }) {
-                Image(icon, "Application Icon")
-            }
-            Column(Modifier.weight(1f)) {
-                Text(
-                    applicationInfo.appName,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                Text(
-                    applicationInfo.packageName,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-            IconButton({
-                val uri = Uri.fromParts("package", applicationInfo.packageName, null)
-                context.startActivity(
-                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                        .setData(uri)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
-            }) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Image(
-                    painterResource(R.drawable.ic_info),
-                    stringResource(R.string.application_info_label)
+                    bitmap = icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(40.dp),
+                    contentScale = ContentScale.Fit,
                 )
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = applicationInfo.appName,
+                        style = MiuixTheme.textStyles.body1,
+                        color = MiuixTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = applicationInfo.packageName,
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                MiuixActionIconButton(onClick = {
+                    val uri = Uri.fromParts("package", applicationInfo.packageName, null)
+                    context.startActivity(
+                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                            .setData(uri)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                }) {
+                    Image(
+                        painterResource(R.drawable.ic_info),
+                        stringResource(R.string.application_info_label),
+                        modifier = Modifier.size(24.dp),
+                        contentScale = ContentScale.Fit,
+                    )
+                }
             }
         }
     }
@@ -192,20 +230,39 @@ class ApplicationInfoPage : ComponentActivity() {
     private fun Tips() {
         val shouldSuggestFakeApp: Boolean =
             appConfigurationUtils.shouldSuggestFakeApp(applicationInfo.packageName)
+        val context = LocalContext.current
+        val onRegistrationAction = {
+            RegistrationHelper(
+                context,
+                applicationInfo.packageName
+            ).deleteRegistrationInfoAndRetryForceRegister()
+        }
 
-        val registeredType: Int = applicationInfo.registeredType
-        if (registeredType == RegisteredType.NotRegistered) {
-            val notRegisteredDesc = stringResource(
-                if (shouldSuggestFakeApp)
-                    R.string.status_app_not_registered_detail_with_fake_suggest
-                else R.string.status_app_not_registered_detail_without_fake_suggest
+        when (registrationActionFor(applicationInfo.registeredType)) {
+            RegistrationAction.REGISTER -> {
+                val notRegisteredDesc = stringResource(
+                    if (shouldSuggestFakeApp)
+                        R.string.status_app_not_registered_detail_with_fake_suggest
+                    else R.string.status_app_not_registered_detail_without_fake_suggest
+                )
+                Tips(
+                    title = stringResource(R.string.status_app_not_registered_title),
+                    description = notRegisteredDesc,
+                    actionDescription = stringResource(R.string.registration_action_description),
+                    actionLabel = stringResource(R.string.registration_action_register_now),
+                    onAction = onRegistrationAction,
+                )
+            }
+
+            RegistrationAction.REREGISTER -> Tips(
+                title = stringResource(R.string.status_app_registered_error_title),
+                description = stringResource(R.string.status_app_registered_error_desc),
+                actionDescription = stringResource(R.string.registration_action_description),
+                actionLabel = stringResource(R.string.registration_action_register_again),
+                onAction = onRegistrationAction,
             )
-            Tips(stringResource(R.string.status_app_not_registered_title), notRegisteredDesc)
-        } else if (registeredType == RegisteredType.Unregistered) {
-            Tips(
-                stringResource(R.string.status_app_registered_error_title),
-                stringResource(R.string.status_app_registered_error_desc)
-            )
+
+            null -> Unit
         }
     }
 
@@ -266,16 +323,22 @@ class ApplicationInfoPage : ComponentActivity() {
     private fun NotificationCategory(categoryName: String, channels: List<NotificationChannel>) {
         SettingsGroup(categoryName) {
             channels.forEach { channel ->
-                SettingsItem(
-                    title = AppConfigurationUtils.getNotificationTitle(
-                        channel
-                    ).toString(),
-                    summary = AppConfigurationUtils.getNotificationSummary(
-                        channel
-                    ),
-                    confirmButton = {},
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
                 ) {
-                    NotificationChannel(channel, appConfigurationUtils)
+                    SettingsItem(
+                        title = AppConfigurationUtils.getNotificationTitle(
+                            channel
+                        ).toString(),
+                        summary = AppConfigurationUtils.getNotificationSummary(
+                            channel
+                        ),
+                        confirmButton = {},
+                    ) {
+                        NotificationChannel(channel, appConfigurationUtils)
+                    }
                 }
             }
         }
@@ -283,32 +346,64 @@ class ApplicationInfoPage : ComponentActivity() {
 
     @Composable
     private fun ManageNotificationItem() {
-        SettingsItem(
-            title = stringResource(R.string.settings_manage_app_notifications),
-            summary = stringResource(R.string.settings_manage_app_notifications_summary),
-            enabled = applicationInfo.registeredType == RegisteredType.NotRegistered,
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
         ) {
-            appConfigurationUtils.gotoNotificationSettingPage()
+            SettingsItem(
+                title = stringResource(R.string.settings_manage_app_notifications),
+                summary = stringResource(R.string.settings_manage_app_notifications_summary),
+                enabled = applicationInfo.registeredType == RegisteredType.NotRegistered,
+            ) {
+                appConfigurationUtils.gotoNotificationSettingPage()
+            }
         }
     }
 
 }
 
 @Composable
-fun Tips(title: String, description: String) {
-    Row(modifier = Modifier.padding(10.dp)) {
-        Icon(
-            painterResource(R.drawable.ic_error_outline_black_24dp), null,
-            tint = Color(0xFFD50000)
-        )
-        Spacer(Modifier.width(10.dp))
-        Column {
-            Text(title, style = MaterialTheme.typography.bodyMedium)
-
-            MarkdownView(
-                description,
-                textSize = MaterialTheme.typography.bodySmall.fontSize.value,
+fun Tips(
+    title: String,
+    description: String,
+    actionDescription: String? = null,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Row(modifier = Modifier.padding(16.dp)) {
+            Icon(
+                painterResource(R.drawable.ic_error_outline_black_24dp), null,
+                tint = Color(0xFFD50000)
             )
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text(title, style = MiuixTheme.textStyles.body2)
+
+                MarkdownView(
+                    description,
+                    textSize = MiuixTheme.textStyles.footnote1.fontSize.value,
+                )
+                if (actionDescription != null && actionLabel != null && onAction != null) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = actionDescription,
+                        style = MiuixTheme.textStyles.footnote1,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Button(
+                        modifier = Modifier.align(Alignment.End),
+                        text = actionLabel,
+                        onClick = onAction,
+                    )
+                }
+            }
         }
     }
 }
@@ -318,17 +413,17 @@ private fun NotificationChannel(
     channel: NotificationChannel, appConfigurationUtils: AppConfigurationUtils
 ) {
     Row {
-        TextButton({
+        MiuixActionButton(onClick = {
             appConfigurationUtils.deleteNotificationChannel(channel)
         }) {
             Text(stringResource(R.string.notification_channels_delete))
         }
-        TextButton({
+        MiuixActionButton(onClick = {
             appConfigurationUtils.copyToClipboard(channel)
         }) {
             Text(stringResource(R.string.notification_channels_copy_id))
         }
-        TextButton({
+        MiuixActionButton(onClick = {
             appConfigurationUtils.gotoNotificationChannelSettingPage(
                 channel,
                 appConfigurationUtils.configApp
