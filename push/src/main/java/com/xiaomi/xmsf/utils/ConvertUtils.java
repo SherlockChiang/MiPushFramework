@@ -57,6 +57,23 @@ public class ConvertUtils {
 
                     @Override
                     public boolean shouldSkipClass(Class<?> clazz) {
+                        // 1. 排除所有 Android Context 和 View 相关的类
+                        if (clazz.getName().startsWith("android.content.Context") ||
+                            clazz.getName().startsWith("android.view.") || 
+                            clazz.getName().startsWith("android.app.")) {
+                            return true;
+                        }
+                        // 2. 排除所有与 Binder/IPC 相关的类，它们通常导致循环
+                        if (clazz.getName().startsWith("android.os.IBinder") ||
+                            clazz.getName().startsWith("android.os.Parcelable$Creator")) {
+                            return true;
+                        }
+                        // 3. 排除所有线程相关的类，如 Looper/Handler
+                        if (clazz.getName().startsWith("android.os.Handler") ||
+                            clazz.getName().startsWith("android.os.Looper")) {
+                            return true;
+                        }
+                        
                         return false;
                     }
                 })
@@ -82,9 +99,30 @@ public class ConvertUtils {
         if (intent == null) {
             return JsonNull.INSTANCE;
         }
+        // 在 toJson(Intent intent) 方法中，修改 GsonBuilder：
         Gson gson = new GsonBuilder()
-                .registerTypeAdapterFactory(new BundleTypeAdapterFactory())
-                .create();
+            .registerTypeAdapterFactory(new BundleTypeAdapterFactory())
+            // 添加新的 ExclusionStrategy
+            .setExclusionStrategies(new ExclusionStrategy() {
+                @Override
+                public boolean shouldSkipField(FieldAttributes f) {
+                    // 排除 Intent 内部可能引起问题的字段，例如 mPackage
+                    if (f.getName().equals("mContext") || f.getName().equals("mIBinder")) {
+                        return true;
+                    }
+                    return false;
+                }
+
+                @Override
+                public boolean shouldSkipClass(Class<?> clazz) {
+                    // 排除 Intent 对象本身 (如果被外部调用序列化 Intent 时)
+                    if (clazz.equals(Intent.class)) {
+                        return true;
+                    }
+                    return false;
+                }
+            })
+            .create();
         JsonObject json = new JsonObject();
         json.add("action", gson.toJsonTree(intent.getAction()));
         if (intent.getExtras() != null) {
