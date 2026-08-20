@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -16,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -25,6 +27,8 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.tooling.preview.Preview
@@ -255,6 +259,16 @@ private fun Main(
     navContent: NavGraphBuilder.() -> Unit
 ) {
     val navController = rememberNavController()
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
+    val swipeRoutes = remember {
+        listOf(
+            Screen.Events.route.toString(),
+            Screen.Apps.route.toString(),
+            Screen.Settings.route.toString(),
+        )
+    }
+    val swipeThresholdPx = with(LocalDensity.current) { 72.dp.toPx() }
 
     MiuixPageScaffold(
         modifier = Modifier.fillMaxSize(),
@@ -289,7 +303,38 @@ private fun Main(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .consumeWindowInsets(paddingValues),
+                .consumeWindowInsets(paddingValues)
+                // Keep the existing NavHost/back-stack architecture and add a lightweight
+                // page-level gesture. Vertical scrolling remains owned by each page; this
+                // detector only starts after horizontal touch-slop and commits on a full swipe.
+                .pointerInput(currentRoute, swipeThresholdPx) {
+                    var dragDistancePx = 0f
+                    detectHorizontalDragGestures(
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            dragDistancePx += dragAmount
+                        },
+                        onDragEnd = {
+                            val targetRoute = routeAfterHorizontalSwipe(
+                                currentRoute = currentRoute,
+                                dragDistancePx = dragDistancePx,
+                                thresholdPx = swipeThresholdPx,
+                                routes = swipeRoutes,
+                            )
+                            if (targetRoute != null) {
+                                navController.navigate(targetRoute) {
+                                    popUpTo(navController.graph.startDestinationId) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            }
+                            dragDistancePx = 0f
+                        },
+                        onDragCancel = { dragDistancePx = 0f },
+                    )
+                },
             navController = navController,
             startDestination = startDestination,
             builder = navContent
