@@ -735,8 +735,14 @@ public class MyMIPushNotificationHelper {
 
         CustomConfiguration configuration = XMPushUtils.getConfiguration(metaInfo);
         Intent activityIntent = getSdkIntent(context, container);
+        // Keep the setting tri-state: an absent key means "use the
+        // MessagingStyle default", while an explicitly supplied false must
+        // continue to request the historical service PendingIntent.
+        Boolean explicitSetting = configuration.keys().contains("use_clicked_activity")
+                ? configuration.useClickedActivity(false)
+                : null;
         boolean useActivity = shouldUseActivityClick(
-                configuration.useClickedActivity(false), messagingStyle, activityIntent);
+                explicitSetting, messagingStyle, activityIntent);
         if (!useActivity) {
             return PendingIntent.getService(context, notificationId, intent,
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
@@ -756,8 +762,17 @@ public class MyMIPushNotificationHelper {
      * historical service PendingIntent unless configuration explicitly opts in.
      */
     static boolean shouldUseActivityClick(
-            boolean explicitlyRequested, boolean messagingStyle, @Nullable Intent activityIntent) {
-        return activityIntent != null && (explicitlyRequested || messagingStyle);
+            @Nullable Boolean explicitSetting, boolean messagingStyle,
+            @Nullable Intent activityIntent) {
+        // A missing/invalid target can never be upgraded to an Activity
+        // PendingIntent. The caller supplies only intents already validated by
+        // getSdkIntent, while this guard keeps the fallback safe for all paths.
+        if (activityIntent == null) {
+            return false;
+        }
+        // Explicit configuration always wins over the MessagingStyle default,
+        // including an explicit false.
+        return explicitSetting != null ? explicitSetting : messagingStyle;
     }
 
     /**

@@ -91,15 +91,27 @@ public class NotificationExecutorTest {
     }
 
     @Test
-    public void messagingNotificationsMayUseValidatedActivityClickByDefault() {
+    public void clickedActivitySettingUsesThreeStateContract() {
         Intent activity = new Intent();
+
+        // Explicit values take precedence over the style-derived default.
         assertTrue(MyMIPushNotificationHelper.shouldUseActivityClick(
-                false, true, activity));
+                Boolean.TRUE, false, activity));
+        assertTrue(!MyMIPushNotificationHelper.shouldUseActivityClick(
+                Boolean.FALSE, true, activity));
+
+        // An absent setting opts MessagingStyle into the Activity path, while
+        // non-MessagingStyle notifications retain the service path.
         assertTrue(MyMIPushNotificationHelper.shouldUseActivityClick(
-                true, false, activity));
+                null, true, activity));
         assertTrue(!MyMIPushNotificationHelper.shouldUseActivityClick(
-                false, false, activity));
+                null, false, activity));
+
+        // No resolved target Activity must always use the safe service path,
+        // even when the setting or style asks for an Activity.
         assertTrue(!MyMIPushNotificationHelper.shouldUseActivityClick(
-                true, true, null));
+                Boolean.TRUE, true, null));
+        assertTrue(!MyMIPushNotificationHelper.shouldUseActivityClick(
+                null, true, null));
     }
 }
