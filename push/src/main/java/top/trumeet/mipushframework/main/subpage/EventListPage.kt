@@ -169,6 +169,8 @@ private fun EventDetailsDialog(
                         // A notification can arrive before its registration row is persisted.
                         // Open the same Miuix permission page in that case and let it offer the
                         // registration action instead of crashing on a missing database record.
+                        show.value = false
+                        onDismiss()
                         EventListPageUtils.startManagePermissions(
                             context,
                             clickedEvent.packageName,
