@@ -7,6 +7,7 @@ import static org.junit.Assert.assertTrue;
 import com.elvishew.xlog.XLog;
 
 import android.content.pm.ActivityInfo;
+import android.content.Intent;
 import android.content.pm.ResolveInfo;
 
 import org.junit.Before;
@@ -87,5 +88,18 @@ public class NotificationExecutorTest {
                 null, resolved));
         assertTrue(!MyMIPushNotificationHelper.isResolvedActivityInTargetPackage(
                 "", resolved));
+    }
+
+    @Test
+    public void messagingNotificationsMayUseValidatedActivityClickByDefault() {
+        Intent activity = new Intent();
+        assertTrue(MyMIPushNotificationHelper.shouldUseActivityClick(
+                false, true, activity));
+        assertTrue(MyMIPushNotificationHelper.shouldUseActivityClick(
+                true, false, activity));
+        assertTrue(!MyMIPushNotificationHelper.shouldUseActivityClick(
+                false, false, activity));
+        assertTrue(!MyMIPushNotificationHelper.shouldUseActivityClick(
+                true, true, null));
     }
 }

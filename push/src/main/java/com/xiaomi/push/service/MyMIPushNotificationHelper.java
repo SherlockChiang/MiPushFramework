@@ -336,6 +336,14 @@ public class MyMIPushNotificationHelper {
         }
         addDebugAction(context, container, decryptedContent, metaInfo, packageName, notificationBuilder);
 
+        if (useMessagingStyle) {
+            // Xiaomi's SystemUI uses this documented MiPush hint for the heads-up
+            // affordance. A conversation with a validated Activity click can then
+            // be dragged into the target application's small window.
+            notificationBuilder.getExtras().putBoolean("miui.enableFloat", true);
+            notificationBuilder.setCategory(Notification.CATEGORY_MESSAGE);
+        }
+
         notificationBuilder.setWhen(metaInfo.getMessageTs());
         notificationBuilder.setShowWhen(custom.notificationShowWhen(true));
 
@@ -347,7 +355,8 @@ public class MyMIPushNotificationHelper {
         intentExtra.putExtra(Constants.INTENT_NOTIFICATION_GROUP, notificationBuilder.build().getGroup());
 
         PendingIntent localPendingIntent = getClickedPendingIntent(
-                context, container, decryptedContent, notificationId, intentExtra.getExtras());
+                context, container, decryptedContent, notificationId, intentExtra.getExtras(),
+                useMessagingStyle);
 
         if (localPendingIntent != null) {
             notificationBuilder.setContentIntent(localPendingIntent);
@@ -692,7 +701,7 @@ public class MyMIPushNotificationHelper {
 
     private static PendingIntent getClickedPendingIntent(
             Context context, XmPushActionContainer container, byte[] decryptedContent,
-            int notificationId, Bundle extra) {
+            int notificationId, Bundle extra, boolean messagingStyle) {
         PushMetaInfo metaInfo = container.getMetaInfo();
         if (metaInfo == null) {
             return null;
@@ -725,9 +734,10 @@ public class MyMIPushNotificationHelper {
         intent.addCategory(String.valueOf(metaInfo.getNotifyId()));
 
         CustomConfiguration configuration = XMPushUtils.getConfiguration(metaInfo);
-        boolean useActivity = configuration.useClickedActivity(false);
         Intent activityIntent = getSdkIntent(context, container);
-        if (!useActivity || activityIntent == null) {
+        boolean useActivity = shouldUseActivityClick(
+                configuration.useClickedActivity(false), messagingStyle, activityIntent);
+        if (!useActivity) {
             return PendingIntent.getService(context, notificationId, intent,
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         }
@@ -736,6 +746,18 @@ public class MyMIPushNotificationHelper {
         activityIntent.putExtras(intent);
         return PendingIntent.getActivity(context, notificationId, activityIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    /**
+     * HyperOS exposes the conversation mini-window affordance only when the
+     * notification click is an Activity PendingIntent. Messaging notifications
+     * already carry a validated target Activity through their SDK intent, so
+     * they may use that path by default. Other notification types retain the
+     * historical service PendingIntent unless configuration explicitly opts in.
+     */
+    static boolean shouldUseActivityClick(
+            boolean explicitlyRequested, boolean messagingStyle, @Nullable Intent activityIntent) {
+        return activityIntent != null && (explicitlyRequested || messagingStyle);
     }
 
     /**
