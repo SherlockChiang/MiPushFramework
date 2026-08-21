@@ -69,6 +69,12 @@ public class SettingUtils {
 
     public static void notifyMockNotification(Context context) {
         String packageName = BuildConfig.APPLICATION_ID;
+        if (!NotificationController.areNotificationsEnabled(context, packageName)) {
+            Utils.makeText(context,
+                    context.getString(R.string.settings_notification_permission_blocked),
+                    Toast.LENGTH_LONG);
+            return;
+        }
         Date date = new Date();
         String title = context.getString(R.string.debug_test_title);
         String description = context.getString(R.string.debug_test_content) + date.toString();
@@ -77,6 +83,12 @@ public class SettingUtils {
 
     public static void notifyMockFocusNotification(Context context) {
         String packageName = BuildConfig.APPLICATION_ID;
+        if (!NotificationController.areNotificationsEnabled(context, packageName)) {
+            Utils.makeText(context,
+                    context.getString(R.string.settings_notification_permission_blocked),
+                    Toast.LENGTH_LONG);
+            return;
+        }
         Date date = new Date();
         String title = context.getString(R.string.debug_test_focus_title);
         String description = context.getString(R.string.debug_test_focus_content) + date;

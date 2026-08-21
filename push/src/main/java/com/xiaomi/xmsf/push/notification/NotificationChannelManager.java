@@ -32,6 +32,9 @@ import top.trumeet.common.utils.CustomConfiguration;
 
 public class NotificationChannelManager {
 
+    /** Dedicated channel for the settings-page replay actions. */
+    public static final String DEBUG_CHANNEL_ID = "mipush_debug_test_v2";
+
     public static NotificationManagerEx getNotificationManagerEx() {
         return NotificationManagerEx.INSTANCE;
     }
@@ -109,6 +112,29 @@ public class NotificationChannelManager {
 
         return createNotificationChannel(metaInfo, packageName, appName);
 
+    }
+
+    /**
+     * Manual replay must remain observable even when a user's normal/default
+     * channel was muted by an earlier configuration. Keep it isolated from
+     * client channels and request a heads-up-capable importance once.
+     */
+    public static void registerDebugChannelIfNeeded(Context context, String packageName) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return;
+        }
+        NotificationChannel existing =
+                getNotificationManagerEx().getNotificationChannel(packageName, DEBUG_CHANNEL_ID);
+        if (existing != null) {
+            return;
+        }
+        NotificationChannel channel = new NotificationChannel(
+                DEBUG_CHANNEL_ID, "MiPush Framework test", NotificationManager.IMPORTANCE_HIGH);
+        channel.setDescription("Manual notification replay");
+        channel.enableVibration(true);
+        channel.enableLights(true);
+        getNotificationManagerEx().createNotificationChannels(
+                packageName, Arrays.asList(channel));
     }
 
     private static NotificationChannel createNotificationChannel(PushMetaInfo metaInfo, String packageName, CharSequence appName) {

@@ -17,6 +17,7 @@ object NotificationManagerEx {
     private lateinit var notificationManager: NotificationManager
     private lateinit var notificationContext: Context
     private var notificationService: Any? = null
+    private var packageAttributionSupported: Boolean? = null
 
     @JvmField
     var isHooked: Boolean = false
@@ -26,6 +27,7 @@ object NotificationManagerEx {
         notificationContext = context.applicationContext
         notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationService = invokeHidden(notificationManager, "getService", emptyArray()).value
+        packageAttributionSupported = null
     }
 
     fun notify(
@@ -38,14 +40,34 @@ object NotificationManagerEx {
             // even when the public NotificationManager call is used.
             notification.extras.putString("xmsf_target_package", packageName)
         }
-        // Official XMSF uses the normal notify path from Android 10 onward;
-        // HyperOS attributes it through xmsf_target_package. Older releases
-        // need the hidden notifyAsPackage bridge when available.
-        val postedAsPackage = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+        // Official XMSF switches to the package-attributed hidden API on
+        // Android 10/HyperOS.  This is what lets SystemUI resolve the real
+        // client's channel, click target and focus renderer; the old bridge
+        // accidentally used the reverse SDK condition and therefore posted
+        // third-party notifications as XMSF on modern devices.
+        val postedAsPackage = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+            supportsPackageAttribution() &&
             notifyAsPackage(packageName, tag, id, notification)
         if (!postedAsPackage) {
             notificationManager.notify(tag, id, notification)
         }
+    }
+
+    /**
+     * Xiaomi's XMSF enables package attribution only when the private fake
+     * condition-provider bridge is installed. Probe the same capability before
+     * calling the hidden API; unsupported/AOSP builds retain the public fallback.
+     */
+    private fun supportsPackageAttribution(): Boolean {
+        packageAttributionSupported?.let { return it }
+        if (!::notificationManager.isInitialized) return false
+        val supported = (invokeHidden(
+            "isSystemConditionProviderEnabled",
+            arrayOf(String::class.java),
+            arrayOf("xmsf_fake_condition_provider_path")
+        ).value as? Boolean) == true
+        packageAttributionSupported = supported
+        return supported
     }
 
     private fun notifyAsPackage(

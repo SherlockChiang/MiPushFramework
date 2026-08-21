@@ -83,6 +83,8 @@ public class NotificationController {
     private static final long FOCUS_PROTOCOL_CACHE_TTL_MILLIS = 5 * 60 * 1000L;
     private static final FocusProtocolSupportCache FOCUS_PROTOCOL_SUPPORT_CACHE =
             new FocusProtocolSupportCache(FOCUS_PROTOCOL_CACHE_TTL_MILLIS);
+    private static final AtomicInteger MOCK_NOTIFICATION_SEQUENCE =
+            new AtomicInteger(10_000);
     // The official client permits a much longer network timeout. Holding our
     // notification worker for that long can starve all push notifications, so the
     // native-icon enhancement gets a small global budget while the URL payload stays.
@@ -90,6 +92,17 @@ public class NotificationController {
 
     public static NotificationManagerEx getNotificationManagerEx() {
         return NotificationManagerEx.INSTANCE;
+    }
+
+    /** Best-effort preflight used by the settings-page diagnostic actions. */
+    public static boolean areNotificationsEnabled(Context context, String packageName) {
+        try {
+            return getNotificationManagerEx().areNotificationsEnabled(packageName);
+        } catch (Throwable error) {
+            // A failed hidden-API probe must not suppress a real delivery.
+            logger.w("Unable to inspect notification permission", error);
+            return true;
+        }
     }
 
 
@@ -146,7 +159,14 @@ public class NotificationController {
 
     public static void publish(Context context, PushMetaInfo metaInfo, int notificationId, String packageName, NotificationCompat.Builder notificationBuilder) {
         String channelId = getExistsChannelId(context, metaInfo, packageName);
-        notificationBuilder.setChannelId(channelId);
+        // Preserve an explicit channel selected by a caller (the settings-page
+        // replay uses a dedicated high-importance channel). Older code always
+        // overwrote it with the client's derived channel, making the replay
+        // appear to do nothing when that channel had been muted.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O
+                || hasNoExplicitChannel(notificationBuilder)) {
+            notificationBuilder.setChannelId(channelId);
+        }
 
         notificationBuilder.setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN);
 
@@ -193,6 +213,19 @@ public class NotificationController {
                 });
 
         updateSummaryNotification(context, metaInfo, packageName, notification.getGroup());
+    }
+
+    private static boolean hasNoExplicitChannel(NotificationCompat.Builder builder) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return true;
+        }
+        try {
+            return TextUtils.isEmpty(builder.build().getChannelId());
+        } catch (Throwable error) {
+            // A partially-built caller notification should still receive the
+            // derived channel rather than fail the entire delivery.
+            return true;
+        }
     }
 
     private static boolean hasOfficialNotificationGroup(@Nullable PushMetaInfo metaInfo) {
@@ -273,9 +306,15 @@ public class NotificationController {
             CustomConfiguration configuration = XMPushUtils.getConfiguration(metaInfo);
             CustomConfiguration.FocusNotificationPayload payload =
                     configuration.focusNotificationPayload();
-            if (!payload.isUsable() || !isFocusProtocolEnabled(context)) {
+            if (!payload.isUsable()) {
                 return false;
             }
+            // Keep the legacy XMSF contract: the public miui.focus.* payload is
+            // forwarded whenever the sender supplied it.  The private protocol
+            // setting is only a capability hint for optional native-image
+            // enrichment; making it a hard gate caused focus notifications to
+            // silently degrade on HyperOS builds which do not expose the setting
+            // to third-party/system-app bridges.
             // Do not hand malformed JSON to the private renderer. Valid picture
             // URL fields remain independently useful and are still forwarded.
             return FocusNotificationSafety.isWellFormedParameter(payload.parameter())
@@ -502,19 +541,43 @@ public class NotificationController {
         if (notification == null || TextUtils.isEmpty(packageName)) {
             return;
         }
+        boolean targetApplied = false;
         try {
             Field field = Notification.class.getDeclaredField("extraNotification");
             field.setAccessible(true);
             Object extraNotification = field.get(notification);
             if (extraNotification != null) {
-                Method method = extraNotification.getClass()
-                        .getDeclaredMethod("setTargetPkg", String.class);
-                method.setAccessible(true);
-                method.invoke(extraNotification, packageName);
-                return;
+                try {
+                    Method method = extraNotification.getClass()
+                            .getDeclaredMethod("setTargetPkg", String.class);
+                    method.setAccessible(true);
+                    method.invoke(extraNotification, packageName);
+                    targetApplied = true;
+                } catch (Throwable ignored) {
+                    // Some HyperOS releases expose only part of MiuiNotification.
+                }
+                // Official XMSF mirrors miui.enableFloat into the hidden
+                // MiuiNotification object. The Bundle key alone is ignored by
+                // several SystemUI versions, which is why MessagingStyle
+                // notifications previously lacked the pull-down mini-window.
+                if (notification.extras != null
+                        && notification.extras.containsKey("miui.enableFloat")) {
+                    try {
+                        Method method = extraNotification.getClass()
+                                .getDeclaredMethod("setEnableFloat", boolean.class);
+                        method.setAccessible(true);
+                        method.invoke(extraNotification,
+                                notification.extras.getBoolean("miui.enableFloat"));
+                    } catch (Throwable ignored) {
+                        // AOSP has no MiuiNotification setter.
+                    }
+                }
             }
         } catch (Throwable ignored) {
             // AOSP and non-MIUI builds do not expose this hidden API.
+        }
+        if (targetApplied) {
+            return;
         }
         try {
             PackageManager packageManager = context.getPackageManager();
@@ -548,8 +611,7 @@ public class NotificationController {
             CustomConfiguration configuration) {
         CustomConfiguration.FocusNotificationPayload payload =
                 configuration.focusNotificationPayload();
-        // Avoid a Settings provider round-trip for ordinary notifications.
-        if (!payload.isUsable() || !isFocusProtocolEnabled(context)) {
+        if (!payload.isUsable()) {
             return;
         }
 
@@ -558,11 +620,19 @@ public class NotificationController {
             focusBundle.putString(FOCUS_PARAM, payload.parameter());
         }
         for (Map.Entry<String, String> picture : payload.pictureUrls().entrySet()) {
-            // Supported MIUI SystemUI needs both the URL and the native Icon.
+            // Keep the URL aliases exactly as received.  This is the part of
+            // Xiaomi's original protocol that remains useful even when the
+            // native focus renderer is unavailable.
             focusBundle.putString(picture.getKey(), picture.getValue());
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                && isFocusProtocolEnabled(context)
                 && !payload.downloadPictureUrls().isEmpty()) {
+            // Native Icon enrichment is bounded (count, bytes, executor queue
+            // and caller budget). Match official XMSF by doing this optional
+            // download only when the ROM advertises notification_focus_protocol;
+            // the parameter and URL aliases above remain available as the
+            // legacy, no-download compatibility path on AOSP/unsupported ROMs.
             focusBundle.putBundle(FOCUS_PICTURES,
                     FocusIconApi23.downloadPictures(context, payload.downloadPictureUrls()));
         }
@@ -890,7 +960,8 @@ public class NotificationController {
 
 
     public static void test(Context context, String packageName, String title, String description) {
-        test(context, packageName, title, description, new PushMetaInfo(), 10001);
+        test(context, packageName, title, description, new PushMetaInfo(),
+                nextMockNotificationId());
     }
 
     public static void testFocus(Context context, String packageName, String title,
@@ -909,20 +980,40 @@ public class NotificationController {
         extras.put("miui.focus.pic_0",
                 "https://raw.githubusercontent.com/SherlockChiang/MiPushFramework/7e2eb27ef86a4ea29d4791a82dd5a557b7f14b62/art/ic_launcher-web.png");
         metaInfo.setExtra(extras);
-        test(context, packageName, title, description, metaInfo, 10002);
+        test(context, packageName, title, description, metaInfo,
+                nextMockNotificationId());
+    }
+
+    /**
+     * Manual replay is a diagnostic action.  Give every tap a fresh id so a
+     * previously dismissed test notification cannot be silently updated without
+     * producing a new entry/head-up alert on MIUI/SystemUI.
+     */
+    private static int nextMockNotificationId() {
+        return MOCK_NOTIFICATION_SEQUENCE.updateAndGet(previous ->
+                previous == Integer.MAX_VALUE ? 10_000 : previous + 1);
     }
 
     private static void test(Context context, String packageName, String title,
                              String description, PushMetaInfo metaInfo, int notificationId) {
-        NotificationChannelManager.registerChannelIfNeeded(context, metaInfo, packageName);
-
-        NotificationCompat.Builder localBuilder = new NotificationCompat.Builder(context);
+        NotificationChannelManager.registerDebugChannelIfNeeded(context, packageName);
+        String channelId = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                ? NotificationChannelManager.DEBUG_CHANNEL_ID
+                : getExistsChannelId(context, metaInfo, packageName);
+        NotificationCompat.Builder localBuilder = new NotificationCompat.Builder(context, channelId);
 
         NotificationCompat.BigTextStyle style = new NotificationCompat.BigTextStyle();
         style.bigText(description);
         style.setBigContentTitle(title);
         style.setSummaryText(description);
         localBuilder.setStyle(style);
+        // BigTextStyle's expanded title is not guaranteed to populate the
+        // standard EXTRA_TITLE/EXTRA_TEXT fields on every AndroidX/MIUI build.
+        // Keep the collapsed notification readable as well.
+        localBuilder.setContentTitle(title);
+        localBuilder.setContentText(description);
+        localBuilder.setTicker(title + ": " + description);
+        localBuilder.setSmallIcon(R.drawable.ic_notifications_black_24dp);
         localBuilder.setWhen(System.currentTimeMillis());
         localBuilder.setShowWhen(true);
 
