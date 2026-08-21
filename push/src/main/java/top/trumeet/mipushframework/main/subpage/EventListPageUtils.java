@@ -150,8 +150,9 @@ public class EventListPageUtils {
             if (container == null) {
                 return ReplayStatus.INVALID_PAYLOAD;
             }
-            MockMIPushMessage.mockProcessMIPushMessage(service, container.deepCopy());
-            return ReplayStatus.DISPATCHED;
+            return MockMIPushMessage.mockProcessMIPushMessage(service, container.deepCopy())
+                    ? ReplayStatus.DISPATCHED
+                    : ReplayStatus.FAILED;
         } catch (Throwable ignored) {
             // Replay is an optional diagnostic action.  Never let a decoder or service race take
             // down the event details dialog.

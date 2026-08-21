@@ -413,6 +413,11 @@ public class MyMIPushNotificationHelper {
         String description = resolved.body();
         CustomConfiguration.NotificationStyle notificationStyle =
                 configuration.notificationStyle();
+        // On non-Xiaomi ROMs the private miui.focus.* renderer is deliberately
+        // disabled. Keep the original, portable focus presentation visible by
+        // expanding the readable body whenever a valid focus payload exists,
+        // even when the text is shorter than the ordinary BigText threshold.
+        boolean hasPortableFocusPayload = configuration.focusNotificationPayload().isUsable();
 
         Bitmap bigPic = getBigPic(context, metaInfo);
         if (notificationStyle == CustomConfiguration.NotificationStyle.COLORFUL) {
@@ -445,7 +450,8 @@ public class MyMIPushNotificationHelper {
             }
             notificationBuilder.setStyle(style);
         } else if (notificationStyle == CustomConfiguration.NotificationStyle.BIG_TEXT
-                || description.length() > NOTIFICATION_BIG_STYLE_MIN_LEN) {
+                || description.length() > NOTIFICATION_BIG_STYLE_MIN_LEN
+                || hasPortableFocusPayload) {
             NotificationCompat.BigTextStyle style = new NotificationCompat.BigTextStyle();
             style.bigText(description);
             style.setBigContentTitle(title);
@@ -650,10 +656,10 @@ public class MyMIPushNotificationHelper {
             CustomConfiguration.FocusNotificationPayload focusPayload =
                     configuration.focusNotificationPayload();
             boolean hasDeliverableFocusPayload =
-                    FocusNotificationSafety.isWellFormedParameter(focusPayload.parameter())
+                    (FocusNotificationSafety.isWellFormedParameter(focusPayload.parameter())
                             || FocusNotificationSafety.isWellFormedParameter(
                                     focusPayload.customParameter())
-                            || !focusPayload.pictureUrls().isEmpty();
+                            || !focusPayload.pictureUrls().isEmpty());
             if (FocusNotificationSafety.shouldIsolateFocusGroup(
                     configuredGroup, hasDeliverableFocusPayload)) {
                 return FocusNotificationSafety.stableFocusGroup(packageName);

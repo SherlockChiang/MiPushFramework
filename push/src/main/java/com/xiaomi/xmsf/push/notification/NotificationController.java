@@ -63,6 +63,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import top.trumeet.common.utils.CustomConfiguration;
+import top.trumeet.common.utils.DeviceFocusPolicy;
 import top.trumeet.common.utils.ImgUtils;
 import top.trumeet.common.utils.NotificationMetadata;
 import top.trumeet.mipushframework.main.AdvancedSettingsPage;
@@ -304,6 +305,14 @@ public class NotificationController {
 
     private static boolean shouldAttachFocusExtras(Context context, PushMetaInfo metaInfo) {
         try {
+            // The private miui.focus.* contract is meaningful only when the
+            // active ROM exposes Xiaomi's SystemUI renderer. On AOSP and other
+            // vendors the portable builder below remains the source of truth;
+            // forwarding private extras there can make vendor SystemUI choose
+            // an empty custom view instead of the readable fallback.
+            if (!usesXiaomiSystemFocusRenderer(context)) {
+                return false;
+            }
             CustomConfiguration configuration = XMPushUtils.getConfiguration(metaInfo);
             CustomConfiguration.FocusNotificationPayload payload =
                     configuration.focusNotificationPayload();
@@ -545,16 +554,21 @@ public class NotificationController {
         }
         boolean targetApplied = false;
         try {
-            Field field = Notification.class.getDeclaredField("extraNotification");
+            // Official XMSF reads the public field. Some HyperOS builds expose
+            // it through a parent declaration, so keep a declared-field
+            // fallback for AOSP/older MIUI variants.
+            Field field;
+            try {
+                field = Notification.class.getField("extraNotification");
+            } catch (NoSuchFieldException ignored) {
+                field = Notification.class.getDeclaredField("extraNotification");
+            }
             field.setAccessible(true);
             Object extraNotification = field.get(notification);
             if (extraNotification != null) {
                 try {
-                    Method method = extraNotification.getClass()
-                            .getDeclaredMethod("setTargetPkg", String.class);
-                    method.setAccessible(true);
-                    method.invoke(extraNotification, packageName);
-                    targetApplied = true;
+                    targetApplied = invokeMiuiMethod(
+                            extraNotification, "setTargetPkg", packageName);
                 } catch (Throwable ignored) {
                     // Some HyperOS releases expose only part of MiuiNotification.
                 }
@@ -565,10 +579,7 @@ public class NotificationController {
                 if (notification.extras != null
                         && notification.extras.containsKey("miui.enableFloat")) {
                     try {
-                        Method method = extraNotification.getClass()
-                                .getDeclaredMethod("setEnableFloat", boolean.class);
-                        method.setAccessible(true);
-                        method.invoke(extraNotification,
+                        invokeMiuiMethod(extraNotification, "setEnableFloat",
                                 notification.extras.getBoolean("miui.enableFloat"));
                     } catch (Throwable ignored) {
                         // AOSP has no MiuiNotification setter.
@@ -588,6 +599,101 @@ public class NotificationController {
             notification.extras.putCharSequence("android.substName", label);
         } catch (Throwable ignored) {
         }
+    }
+
+    private static boolean usesXiaomiSystemFocusRenderer(Context context) {
+        if (context == null) {
+            return false;
+        }
+        int protocolVersion = readFocusProtocolVersion(context);
+        String systemUiPackage = findXiaomiSystemUiPackage(context);
+        return DeviceFocusPolicy.rendererFor(
+                systemUiPackage, Build.MANUFACTURER, protocolVersion)
+                == DeviceFocusPolicy.Renderer.SYSTEM;
+    }
+
+    /**
+     * Return a package that is actually installed on the device and is known to
+     * host Xiaomi's focus renderer. The package-manager probe is deliberately
+     * best effort: an AOSP device must never be classified as Xiaomi merely
+     * because a compatibility module uses a MIUI class namespace.
+     */
+    @Nullable
+    private static String findXiaomiSystemUiPackage(Context context) {
+        if (!DeviceFocusPolicy.isXiaomiManufacturer(Build.MANUFACTURER)) {
+            return null;
+        }
+        PackageManager packageManager = context.getPackageManager();
+        String[] candidates = {
+                "com.android.systemui",
+                "miui.systemui.plugin",
+                "com.miui.aod"
+        };
+        for (String candidate : candidates) {
+            try {
+                packageManager.getApplicationInfo(candidate, 0);
+                return candidate;
+            } catch (PackageManager.NameNotFoundException ignored) {
+                // Try the next known host. Some HyperOS releases package the
+                // plugin separately while others keep it inside SystemUI.
+            } catch (Throwable error) {
+                logger.w("Unable to inspect Xiaomi SystemUI package", error);
+                return null;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Invoke a MiuiNotification setter across HyperOS class hierarchies.
+     * Several releases return a private subclass whose setter is declared on
+     * a parent; getDeclaredMethod() on the concrete class alone silently misses
+     * that API and leaves SystemUI without the target package/float hint.
+     */
+    private static boolean invokeMiuiMethod(Object target, String name, Object argument)
+            throws ReflectiveOperationException {
+        Class<?> current = target.getClass();
+        while (current != null) {
+            for (Method method : current.getDeclaredMethods()) {
+                if (!name.equals(method.getName()) || method.getParameterTypes().length != 1) {
+                    continue;
+                }
+                Class<?> parameterType = method.getParameterTypes()[0];
+                if (argument == null || box(parameterType).isInstance(argument)) {
+                    method.setAccessible(true);
+                    method.invoke(target, argument);
+                    return true;
+                }
+            }
+            current = current.getSuperclass();
+        }
+        // Public inherited methods are not always returned by the loop above
+        // when a vendor class uses bridge methods.
+        for (Method method : target.getClass().getMethods()) {
+            if (!name.equals(method.getName()) || method.getParameterTypes().length != 1) {
+                continue;
+            }
+            Class<?> parameterType = method.getParameterTypes()[0];
+            if (argument == null || box(parameterType).isInstance(argument)) {
+                method.setAccessible(true);
+                method.invoke(target, argument);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static Class<?> box(Class<?> type) {
+        if (!type.isPrimitive()) return type;
+        if (type == Boolean.TYPE) return Boolean.class;
+        if (type == Byte.TYPE) return Byte.class;
+        if (type == Character.TYPE) return Character.class;
+        if (type == Short.TYPE) return Short.class;
+        if (type == Integer.TYPE) return Integer.class;
+        if (type == Long.TYPE) return Long.class;
+        if (type == Float.TYPE) return Float.class;
+        if (type == Double.TYPE) return Double.class;
+        return type;
     }
 
     private static void applyAlertBehavior(
@@ -658,17 +764,23 @@ public class NotificationController {
             return false;
         }
         return FOCUS_PROTOCOL_SUPPORT_CACHE.get(SystemClock.elapsedRealtime(), () -> {
-            int protocolVersion;
-            try {
-                protocolVersion = Settings.System.getInt(context.getContentResolver(),
-                        FOCUS_PROTOCOL_SETTING, 0);
-            } catch (Throwable error) {
-                logger.w("Unable to read focus-notification protocol setting", error);
-                return false;
-            }
+            int protocolVersion = readFocusProtocolVersion(context);
             return CustomConfiguration.FocusNotificationPayload
                     .isSupportedProtocolVersion(protocolVersion);
         });
+    }
+
+    private static int readFocusProtocolVersion(Context context) {
+        if (context == null) {
+            return 0;
+        }
+        try {
+            return Settings.System.getInt(context.getContentResolver(),
+                    FOCUS_PROTOCOL_SETTING, 0);
+        } catch (Throwable error) {
+            logger.w("Unable to read focus-notification protocol setting", error);
+            return 0;
+        }
     }
 
     @RequiresApi(Build.VERSION_CODES.M)
