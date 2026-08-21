@@ -129,6 +129,53 @@ public class CustomConfigurationTest {
     }
 
     @Test
+    public void focusPayloadCapturesBoundedCustomParameterWithoutParcelableGuessing() {
+        Map<String, String> extras = new HashMap<>();
+        String custom = "{\"business\":\"tsmclient\",\"param_island\":{"
+                + "\"islandTimeout\":3}}";
+        extras.put("miui.focus.param.custom", custom);
+
+        CustomConfiguration.FocusNotificationPayload payload =
+                new CustomConfiguration(extras).focusNotificationPayload();
+
+        assertTrue(payload.isUsable());
+        assertEquals(custom, payload.customParameter());
+        assertNull(payload.parameter());
+        assertTrue(payload.pictureUrls().isEmpty());
+    }
+
+    @Test
+    public void focusPayloadRejectsMalformedOrOversizedCustomParameter() {
+        Map<String, String> extras = new HashMap<>();
+        extras.put("miui.focus.param.custom", "not-json");
+
+        CustomConfiguration.FocusNotificationPayload malformed =
+                new CustomConfiguration(extras).focusNotificationPayload();
+        assertNull(malformed.customParameter());
+        assertFalse(malformed.isUsable());
+
+        extras.put("miui.focus.param.custom", "{not-json}");
+        CustomConfiguration.FocusNotificationPayload malformedObject =
+                new CustomConfiguration(extras).focusNotificationPayload();
+        // The common module rejects obvious scalar values, while the push
+        // module's full parser rejects this syntactically invalid object.
+        assertEquals("{not-json}", malformedObject.customParameter());
+        assertTrue(malformedObject.isUsable());
+
+        StringBuilder oversized = new StringBuilder("{");
+        while (oversized.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length
+                <= CustomConfiguration.FOCUS_PARAM_MAX_BYTES) {
+            oversized.append('x');
+        }
+        oversized.append('}');
+        extras.put("miui.focus.param.custom", oversized.toString());
+        CustomConfiguration.FocusNotificationPayload rejected =
+                new CustomConfiguration(extras).focusNotificationPayload();
+        assertNull(rejected.customParameter());
+        assertFalse(rejected.isUsable());
+    }
+
+    @Test
     public void blankFocusParameterNeedsAtLeastOnePicture() {
         Map<String, String> extras = new HashMap<>();
         extras.put("miui.focus.param", "   ");

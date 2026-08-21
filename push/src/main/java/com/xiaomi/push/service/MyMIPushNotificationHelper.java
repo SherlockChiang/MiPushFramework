@@ -651,6 +651,8 @@ public class MyMIPushNotificationHelper {
                     configuration.focusNotificationPayload();
             boolean hasDeliverableFocusPayload =
                     FocusNotificationSafety.isWellFormedParameter(focusPayload.parameter())
+                            || FocusNotificationSafety.isWellFormedParameter(
+                                    focusPayload.customParameter())
                             || !focusPayload.pictureUrls().isEmpty();
             if (FocusNotificationSafety.shouldIsolateFocusGroup(
                     configuredGroup, hasDeliverableFocusPayload)) {

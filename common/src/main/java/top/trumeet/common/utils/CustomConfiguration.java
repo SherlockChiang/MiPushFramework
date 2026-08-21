@@ -66,6 +66,12 @@ public class CustomConfiguration {
     private static final String NOTIFICATION_FOLD = "notification_fold";
     private static final String MIUI_FOLD_TIMEOUT = "miui.fold.timeout";
     private static final String FOCUS_PARAM = "miui.focus.param";
+    /**
+     * HyperOS' custom focus renderer receives a second JSON parameter.  This is
+     * distinct from the public {@code miui.focus.param} payload used by the
+     * original XMSF helper.
+     */
+    private static final String FOCUS_PARAM_CUSTOM = "miui.focus.param.custom";
     private static final String FOCUS_PICTURE_PREFIX = "miui.focus.pic_";
 
     /** Limits published by Xiaomi for the focus-notification protocol. */
@@ -297,6 +303,17 @@ public class CustomConfiguration {
     }
 
     /**
+     * Return the optional HyperOS custom-focus JSON verbatim. A bounded object
+     * candidate is retained by {@link FocusNotificationPayload}; the push
+     * module performs full JSON validation. Keeping this accessor string-based
+     * is important because PushMetaInfo.extra is a
+     * Map&lt;String,String&gt; and cannot carry a RemoteViews/Bundle object.
+     */
+    public String focusParamCustom(String defaultValue) {
+        return get(FOCUS_PARAM_CUSTOM, defaultValue);
+    }
+
+    /**
      * Parse the documented, public part of Xiaomi's focus-notification payload.
      * Picture values are forwarded exactly like official XMSF. Only this
      * process' optional native-Icon downloads apply URI safety filtering.
@@ -305,6 +322,15 @@ public class CustomConfiguration {
         String parameter = focusParam(null);
         if (!FocusNotificationPayload.isParameterWithinLimit(parameter)) {
             parameter = null;
+        }
+
+        String customParameter = focusParamCustom(null);
+        // Keep malformed/scalar values out of the focus payload at the
+        // configuration boundary. The push module performs the full JSON parse
+        // before handing the value to HyperOS; this inexpensive shape check
+        // avoids carrying obvious garbage through every notification path.
+        if (!FocusNotificationPayload.isJsonObjectCandidate(customParameter)) {
+            customParameter = null;
         }
 
         List<Map.Entry<String, String>> pictureEntries = new ArrayList<>();
@@ -323,7 +349,7 @@ public class CustomConfiguration {
             // bundle is deliberately capped separately by downloadPictureUrls().
             pictures.put(entry.getKey(), entry.getValue());
         }
-        return new FocusNotificationPayload(parameter, pictures);
+        return new FocusNotificationPayload(parameter, customParameter, pictures);
     }
 
     /** Compare digit runs by numeric value so pic_2 sorts before pic_10. */
@@ -430,11 +456,14 @@ public class CustomConfiguration {
 
     public static final class FocusNotificationPayload {
         private final String parameter;
+        private final String customParameter;
         private final Map<String, String> pictureUrls;
 
         private FocusNotificationPayload(@Nullable String parameter,
+                                         @Nullable String customParameter,
                                          Map<String, String> pictureUrls) {
             this.parameter = parameter;
+            this.customParameter = customParameter;
             this.pictureUrls = Collections.unmodifiableMap(
                     new LinkedHashMap<>(pictureUrls));
         }
@@ -442,6 +471,12 @@ public class CustomConfiguration {
         @Nullable
         public String parameter() {
             return parameter;
+        }
+
+        /** Optional HyperOS custom-focus JSON consumed by the CUSTOM renderer. */
+        @Nullable
+        public String customParameter() {
+            return customParameter;
         }
 
         public Map<String, String> pictureUrls() {
@@ -464,6 +499,7 @@ public class CustomConfiguration {
 
         public boolean isUsable() {
             return (parameter != null && !parameter.trim().isEmpty())
+                    || (customParameter != null && !customParameter.trim().isEmpty())
                     || !pictureUrls.isEmpty();
         }
 
@@ -479,6 +515,21 @@ public class CustomConfiguration {
             return parameter != null
                     && parameter.getBytes(StandardCharsets.UTF_8).length
                     <= FOCUS_PARAM_MAX_BYTES;
+        }
+
+        /**
+         * Cheap boundary check used by the common module, which deliberately
+         * has no JSON parser dependency. The push module's Gson-backed safety
+         * check remains authoritative and rejects malformed object syntax.
+         */
+        public static boolean isJsonObjectCandidate(@Nullable String parameter) {
+            if (!isParameterWithinLimit(parameter)) {
+                return false;
+            }
+            String value = parameter.trim();
+            return value.length() >= 2
+                    && value.charAt(0) == '{'
+                    && value.charAt(value.length() - 1) == '}';
         }
 
         public static boolean isPictureSizeAllowed(long downloadSize) {

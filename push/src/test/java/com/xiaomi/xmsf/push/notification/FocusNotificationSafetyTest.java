@@ -85,6 +85,14 @@ public class FocusNotificationSafetyTest {
     }
 
     @Test
+    public void customFocusParameterUsesTheSameBoundedJsonObjectContract() {
+        assertTrue(FocusNotificationSafety.isWellFormedParameter(
+                "{\"business\":\"tsmclient\",\"param_island\":{}}"));
+        assertFalse(FocusNotificationSafety.isWellFormedParameter("\"not-an-object\""));
+        assertFalse(FocusNotificationSafety.isWellFormedParameter("[]"));
+    }
+
+    @Test
     public void deeplyNestedJsonCannotBreakTheStandardFallback() {
         String deeplyNested = "[".repeat(1_200) + "0" + "]".repeat(1_200);
 

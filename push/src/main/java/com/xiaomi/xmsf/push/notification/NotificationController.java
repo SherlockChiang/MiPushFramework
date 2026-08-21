@@ -79,6 +79,7 @@ public class NotificationController {
     private static final String NOTIFICATION_SMALL_ICON = "mipush_small_notification";
     private static final String FOCUS_PROTOCOL_SETTING = "notification_focus_protocol";
     private static final String FOCUS_PARAM = "miui.focus.param";
+    private static final String FOCUS_PARAM_CUSTOM = "miui.focus.param.custom";
     private static final String FOCUS_PICTURES = "miui.focus.pics";
     private static final long FOCUS_PROTOCOL_CACHE_TTL_MILLIS = 5 * 60 * 1000L;
     private static final FocusProtocolSupportCache FOCUS_PROTOCOL_SUPPORT_CACHE =
@@ -318,6 +319,7 @@ public class NotificationController {
             // Do not hand malformed JSON to the private renderer. Valid picture
             // URL fields remain independently useful and are still forwarded.
             return FocusNotificationSafety.isWellFormedParameter(payload.parameter())
+                    || FocusNotificationSafety.isWellFormedParameter(payload.customParameter())
                     || !payload.pictureUrls().isEmpty();
         } catch (Throwable error) {
             logger.w("Unable to inspect focus-notification payload", error);
@@ -618,6 +620,15 @@ public class NotificationController {
         Bundle focusBundle = new Bundle();
         if (FocusNotificationSafety.isWellFormedParameter(payload.parameter())) {
             focusBundle.putString(FOCUS_PARAM, payload.parameter());
+        }
+        // HyperOS uses a separate JSON object for app-specific CUSTOM focus
+        // templates (for example transit-card and payment notifications).  It
+        // is safe to forward as a bounded string, but the associated actions
+        // Bundle/RemoteViews are intentionally not synthesized here: they are
+        // Parcelable objects owned by the originating app and are not present
+        // in PushMetaInfo.extra's String map.
+        if (FocusNotificationSafety.isWellFormedParameter(payload.customParameter())) {
+            focusBundle.putString(FOCUS_PARAM_CUSTOM, payload.customParameter());
         }
         for (Map.Entry<String, String> picture : payload.pictureUrls().entrySet()) {
             // Keep the URL aliases exactly as received.  This is the part of
