@@ -35,7 +35,9 @@ public class NotificationExecutorTest {
         assertTrue("Core thread timeout must be enabled", executor.allowsCoreThreadTimeOut());
 
         assertTrue("Work queue must be ArrayBlockingQueue", executor.getQueue() instanceof ArrayBlockingQueue);
-        assertEquals("Queue remaining + size initial capacity must be 32", 32, executor.getQueue().remainingCapacity() + executor.getQueue().size());
+        assertEquals("Queue remaining + size initial capacity must match the bounded payload queue",
+                MyMIPushNotificationHelper.NOTIFICATION_QUEUE_CAPACITY,
+                executor.getQueue().remainingCapacity() + executor.getQueue().size());
 
         assertTrue("RejectedExecutionHandler must be CallerRunsPolicy",
                 executor.getRejectedExecutionHandler() instanceof ThreadPoolExecutor.CallerRunsPolicy);

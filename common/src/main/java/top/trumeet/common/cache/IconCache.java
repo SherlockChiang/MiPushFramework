@@ -85,6 +85,37 @@ public class IconCache {
         }.get("white_" + pkg);
     }
 
+    /**
+     * Release decoded icon memory when the process is under pressure.  The caches are only
+     * accelerators; dropping them cannot affect notification delivery because every miss reloads
+     * the package icon on demand.
+     */
+    public void trimMemory(int level) {
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
+            clearMemory();
+        } else if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            trimToSize(bitmapLruCache.maxSize() / 2,
+                    mIconMemoryCaches.maxSize() / 2,
+                    appColorCache.maxSize() / 2,
+                    bitmapCache.maxSize() / 2);
+        }
+    }
+
+    public void clearMemory() {
+        bitmapLruCache.evictAll();
+        mIconMemoryCaches.evictAll();
+        appColorCache.evictAll();
+        bitmapCache.evictAll();
+    }
+
+    private void trimToSize(int rawIconMaxSize, int whiteIconMaxSize,
+                            int colorMaxSize, int bitmapMaxSize) {
+        bitmapLruCache.trimToSize(rawIconMaxSize);
+        mIconMemoryCaches.trimToSize(whiteIconMaxSize);
+        appColorCache.trimToSize(colorMaxSize);
+        bitmapCache.trimToSize(bitmapMaxSize);
+    }
+
 
     public int getAppColor(final Context ctx, final String pkg, Converter<Bitmap, Integer> callback) {
         return new AbstractCacheAspect<Integer>(appColorCache) {

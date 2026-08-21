@@ -39,5 +39,10 @@ public class ApplicationNameCache {
         }.get(pkg);
     }
 
+    /** Names are cheap to reload and may be discarded when the process is under memory pressure. */
+    public void clearMemory() {
+        cacheInstance.evictAll();
+    }
+
 
 }

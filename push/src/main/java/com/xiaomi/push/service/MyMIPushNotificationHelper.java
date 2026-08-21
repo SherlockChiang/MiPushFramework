@@ -137,6 +137,12 @@ public class MyMIPushNotificationHelper {
 
     private static final java.util.concurrent.atomic.AtomicInteger NOTIFICATION_THREAD_COUNT =
             new java.util.concurrent.atomic.AtomicInteger(1);
+    /**
+     * Keep the hand-off queue deliberately small because each queued task retains a decrypted
+     * push payload.  CallerRunsPolicy remains the lossless back-pressure mechanism: when this
+     * bound is reached the producer performs the notification work itself instead of dropping it.
+     */
+    static final int NOTIFICATION_QUEUE_CAPACITY = 16;
     private static final java.util.concurrent.ThreadPoolExecutor executorService = createNotificationExecutor();
 
     /**
@@ -158,7 +164,7 @@ public class MyMIPushNotificationHelper {
                 3,
                 30L,
                 java.util.concurrent.TimeUnit.SECONDS,
-                new java.util.concurrent.ArrayBlockingQueue<>(32),
+                new java.util.concurrent.ArrayBlockingQueue<>(NOTIFICATION_QUEUE_CAPACITY),
                 r -> {
                     Thread t = new Thread(() -> {
                         try {
