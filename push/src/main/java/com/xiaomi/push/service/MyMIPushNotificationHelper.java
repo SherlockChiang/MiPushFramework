@@ -943,7 +943,12 @@ public class MyMIPushNotificationHelper {
         // bridge and become a no-op. Payload routing is therefore a fallback,
         // not an override, whenever the SDK supplied an explicit route.
         Intent payloadIntent = getPayloadRouteIntent(context, container);
-        intent = chooseClickRoute(intent, payloadIntent);
+        // A default-launcher effect is only a generic fallback. If the client
+        // also supplied a concrete deep link in its encrypted payload, prefer
+        // that link; explicit intent/class/web effects remain authoritative.
+        Intent authoritativeSdkRoute =
+                PushConstants.NOTIFICATION_CLICK_DEFAULT.equals(typeId) ? null : intent;
+        intent = chooseClickRoute(authoritativeSdkRoute, payloadIntent);
 
 
         if (intent != null) {
