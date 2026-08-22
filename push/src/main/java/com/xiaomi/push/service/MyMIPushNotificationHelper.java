@@ -933,12 +933,17 @@ public class MyMIPushNotificationHelper {
         // Some SDKs keep the actual deep link in the encrypted SendMessage
         // payload rather than in metaInfo.extra. Decode it with the stored
         // registration secret and inspect only documented route-like fields;
-        // this remains app-agnostic and lets Zhihu/Tieba-style links work
-        // without package-specific adapters.
+        // this remains app-agnostic and lets clients without a click metadata
+        // route (for example Zhihu) work without package-specific adapters.
+        //
+        // An explicit notify_effect/intent_uri is the sender's official bridge
+        // contract. Keep it authoritative: proxy Activities such as Tieba's
+        // XmNotifyActivity consume the complete MiPush click extras, whereas a
+        // seemingly equivalent URI found inside the payload may bypass that
+        // bridge and become a no-op. Payload routing is therefore a fallback,
+        // not an override, whenever the SDK supplied an explicit route.
         Intent payloadIntent = getPayloadRouteIntent(context, container);
-        if (payloadIntent != null) {
-            intent = payloadIntent;
-        }
+        intent = chooseClickRoute(intent, payloadIntent);
 
 
         if (intent != null) {
@@ -971,7 +976,25 @@ public class MyMIPushNotificationHelper {
 
     private static final int PAYLOAD_ROUTE_MAX_DEPTH = 8;
     private static final int PAYLOAD_ROUTE_MAX_NODES = 256;
-    private static final int PAYLOAD_ROUTE_MAX_LENGTH = 4096;
+    /** Maximum size of a single URI/intent route extracted from a payload. */
+    private static final int PAYLOAD_ROUTE_MAX_LENGTH = 16 * 1024;
+    /**
+     * Do not truncate JSON before parsing it. A truncated document is invalid
+     * and silently forces a launcher fallback (the Zhihu payloads are commonly
+     * just over 4 KiB). Reject truly unreasonable documents instead.
+     */
+    private static final int PAYLOAD_DOCUMENT_MAX_LENGTH = 64 * 1024;
+
+    /**
+     * Selects the sender-provided click bridge before a route discovered in the
+     * encrypted application payload. The latter is only a fallback for clients
+     * that did not publish a notify_effect route at all.
+     */
+    @Nullable
+    static Intent chooseClickRoute(
+            @Nullable Intent explicitSdkRoute, @Nullable Intent payloadRoute) {
+        return explicitSdkRoute != null ? explicitSdkRoute : payloadRoute;
+    }
 
     @Nullable
     private static Intent getPayloadRouteIntent(Context context, XmPushActionContainer container) {
@@ -989,8 +1012,8 @@ public class MyMIPushNotificationHelper {
                 return null;
             }
             String payload = message.getPayload().trim();
-            if (payload.length() > PAYLOAD_ROUTE_MAX_LENGTH) {
-                payload = payload.substring(0, PAYLOAD_ROUTE_MAX_LENGTH);
+            if (payload.length() > PAYLOAD_DOCUMENT_MAX_LENGTH) {
+                return null;
             }
             int[] nodeCount = new int[]{0};
             if (payload.startsWith("{")) {

@@ -2,6 +2,7 @@ package com.xiaomi.push.service;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 import com.elvishew.xlog.XLog;
@@ -116,5 +117,23 @@ public class NotificationExecutorTest {
                 Boolean.TRUE, true, null));
         assertTrue(!MyMIPushNotificationHelper.shouldUseActivityClick(
                 null, true, null));
+    }
+
+    @Test
+    public void explicitSdkRouteWinsOverPayloadRoute() {
+        Intent officialBridge = new Intent("official-bridge");
+        Intent payloadDeepLink = new Intent("payload-deep-link");
+
+        // Tieba-style proxy Activities must keep the sender's official
+        // intent_uri; a similarly resolvable URI embedded in the payload must
+        // not bypass that bridge.
+        assertSame(officialBridge, MyMIPushNotificationHelper.chooseClickRoute(
+                officialBridge, payloadDeepLink));
+
+        // Apps that omit notify_effect/intent_uri (such as Zhihu's feed push)
+        // still get the encrypted payload deep link.
+        assertSame(payloadDeepLink, MyMIPushNotificationHelper.chooseClickRoute(
+                null, payloadDeepLink));
+        assertSame(null, MyMIPushNotificationHelper.chooseClickRoute(null, null));
     }
 }
