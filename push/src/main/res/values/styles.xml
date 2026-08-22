@@ -36,5 +36,12 @@
         <item name="android:backgroundDimEnabled">false</item>
     </style>
 
+    <style name="Theme.NotificationClick" parent="Theme.Transparent">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:windowDisablePreview">true</item>
+        <item name="android:colorAccent">@android:color/transparent</item>
+    </style>
+
 
 </resources>

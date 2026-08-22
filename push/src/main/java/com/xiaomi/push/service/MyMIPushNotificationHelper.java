@@ -48,17 +48,26 @@ import com.xiaomi.channel.commonutils.reflect.JavaCalls;
 import com.xiaomi.mipush.sdk.PushMessageProcessor;
 import com.xiaomi.push.sdk.MyPushMessageHandler;
 import com.xiaomi.xmpush.thrift.PushMetaInfo;
+import com.xiaomi.xmpush.thrift.PushMessage;
+import com.xiaomi.xmpush.thrift.XmPushActionSendMessage;
 import com.xiaomi.xmpush.thrift.XmPushActionContainer;
 import com.xiaomi.xmsf.R;
 import com.xiaomi.xmsf.push.notification.FocusNotificationSafety;
 import com.xiaomi.xmsf.push.notification.NotificationController;
 import com.xiaomi.xmsf.push.utils.Configurations;
 import com.xiaomi.xmsf.push.utils.IconConfigurations;
+import com.xiaomi.xmsf.push.utils.RegSecUtils;
 import com.xiaomi.xmsf.utils.ConfigCenter;
+import com.xiaomi.xmsf.utils.ConvertUtils;
+
+import org.apache.thrift.TBase;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.net.MalformedURLException;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -769,10 +778,26 @@ public class MyMIPushNotificationHelper {
             return PendingIntent.getService(context, notificationId, intent,
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         }
-        activityIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        activityIntent.putExtra("mipush_serviceIntent", intent);
-        activityIntent.putExtras(intent);
-        return PendingIntent.getActivity(context, notificationId, activityIntent,
+
+        // A direct target Activity skips the MiPush SDK's notification-click
+        // callback. Use a transparent XMSF trampoline so every client receives
+        // the original service intent first, while the sender-provided target
+        // Activity remains the final destination. This is deliberately generic:
+        // no package name or vendor Activity is recognized here.
+        Intent clickTrampoline = new Intent(context,
+                com.xiaomi.xmsf.NotificationClickActivity.class);
+        clickTrampoline.putExtra(
+                com.xiaomi.xmsf.NotificationClickActivity.EXTRA_TARGET_INTENT,
+                activityIntent);
+        clickTrampoline.putExtra(
+                com.xiaomi.xmsf.NotificationClickActivity.EXTRA_SERVICE_INTENT,
+                intent);
+        // The payload is already carried by EXTRA_SERVICE_INTENT. Do not copy
+        // it again into the outer Intent: large focus payloads can otherwise
+        // exceed Android's Binder transaction limit when SystemUI sends the
+        // PendingIntent.
+        clickTrampoline.putExtras(extra);
+        return PendingIntent.getActivity(context, notificationId, clickTrampoline,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
@@ -833,20 +858,17 @@ public class MyMIPushNotificationHelper {
      * @see PushMessageProcessor#getNotificationMessageIntent
      */
     public static Intent getSdkIntent(Context context, XmPushActionContainer container) {
+        if (context == null || container == null || TextUtils.isEmpty(container.packageName)) {
+            return null;
+        }
         String pkgName = container.packageName;
         PushMetaInfo paramPushMetaInfo = container.getMetaInfo();
+        if (paramPushMetaInfo == null) {
+            return null;
+        }
         Map<String, String> extra = paramPushMetaInfo.getExtra();
-        if (extra == null) {
-            return null;
-        }
-
-        if (!extra.containsKey(PushConstants.EXTRA_PARAM_NOTIFY_EFFECT)) {
-            return null;
-        }
-
+        String typeId = extra == null ? null : extra.get(PushConstants.EXTRA_PARAM_NOTIFY_EFFECT);
         Intent intent = null;
-
-        String typeId = extra.get(PushConstants.EXTRA_PARAM_NOTIFY_EFFECT);
         if (PushConstants.NOTIFICATION_CLICK_DEFAULT.equals(typeId)) {
             try {
                 intent = context.getPackageManager().getLaunchIntentForPackage(pkgName);
@@ -908,6 +930,16 @@ public class MyMIPushNotificationHelper {
             }
         }
 
+        // Some SDKs keep the actual deep link in the encrypted SendMessage
+        // payload rather than in metaInfo.extra. Decode it with the stored
+        // registration secret and inspect only documented route-like fields;
+        // this remains app-agnostic and lets Zhihu/Tieba-style links work
+        // without package-specific adapters.
+        Intent payloadIntent = getPayloadRouteIntent(context, container);
+        if (payloadIntent != null) {
+            intent = payloadIntent;
+        }
+
 
         if (intent != null) {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -926,10 +958,6 @@ public class MyMIPushNotificationHelper {
                 if (intent == null) {
                     return null;
                 }
-                //TODO fixit
-
-                //we don't have RegSecret we cannot decode push action
-
                 if (inFetchIntentBlackList(pkgName)) {
                     return null;
                 }
@@ -939,6 +967,150 @@ public class MyMIPushNotificationHelper {
         }
 
         return null;
+    }
+
+    private static final int PAYLOAD_ROUTE_MAX_DEPTH = 8;
+    private static final int PAYLOAD_ROUTE_MAX_NODES = 256;
+    private static final int PAYLOAD_ROUTE_MAX_LENGTH = 4096;
+
+    @Nullable
+    private static Intent getPayloadRouteIntent(Context context, XmPushActionContainer container) {
+        try {
+            String regSec = RegSecUtils.getRegSec(container);
+            if (TextUtils.isEmpty(regSec)) {
+                return null;
+            }
+            TBase messageBody = ConvertUtils.getResponseMessageBodyFromContainer(container, regSec);
+            if (!(messageBody instanceof XmPushActionSendMessage)) {
+                return null;
+            }
+            PushMessage message = ((XmPushActionSendMessage) messageBody).getMessage();
+            if (message == null || TextUtils.isEmpty(message.getPayload())) {
+                return null;
+            }
+            String payload = message.getPayload().trim();
+            if (payload.length() > PAYLOAD_ROUTE_MAX_LENGTH) {
+                payload = payload.substring(0, PAYLOAD_ROUTE_MAX_LENGTH);
+            }
+            int[] nodeCount = new int[]{0};
+            if (payload.startsWith("{")) {
+                return findPayloadRoute(context, container.packageName,
+                        new JSONObject(payload), 0, nodeCount);
+            }
+            if (payload.startsWith("[")) {
+                return findPayloadRoute(context, container.packageName,
+                        new JSONArray(payload), 0, nodeCount);
+            }
+            return resolvePayloadRoute(context, container.packageName, payload);
+        } catch (Throwable error) {
+            // Missing registration secrets, malformed app payloads, and old
+            // protocol variants must fall back to notify_effect/Launcher.
+            logger.d("Unable to decode a notification payload route for "
+                    + container.packageName);
+            return null;
+        }
+    }
+
+    @Nullable
+    private static Intent findPayloadRoute(
+            Context context, String packageName, Object value, int depth, int[] nodeCount) {
+        if (value == null || depth > PAYLOAD_ROUTE_MAX_DEPTH
+                || nodeCount[0]++ >= PAYLOAD_ROUTE_MAX_NODES) {
+            return null;
+        }
+        if (value instanceof JSONObject) {
+            JSONObject object = (JSONObject) value;
+            java.util.Iterator<String> keys = object.keys();
+            while (keys.hasNext()) {
+                String key = keys.next();
+                Object child = object.opt(key);
+                if (child instanceof String && isPayloadRouteKey(key)) {
+                    Intent candidate = resolvePayloadRoute(
+                            context, packageName, (String) child);
+                    if (candidate != null) {
+                        return candidate;
+                    }
+                }
+                Intent nested = findPayloadRoute(
+                        context, packageName, child, depth + 1, nodeCount);
+                if (nested != null) {
+                    return nested;
+                }
+            }
+        } else if (value instanceof JSONArray) {
+            JSONArray array = (JSONArray) value;
+            for (int i = 0; i < array.length(); i++) {
+                Intent nested = findPayloadRoute(
+                        context, packageName, array.opt(i), depth + 1, nodeCount);
+                if (nested != null) {
+                    return nested;
+                }
+            }
+        } else if (value instanceof String) {
+            String candidate = ((String) value).trim();
+            if (candidate.startsWith("{") || candidate.startsWith("[")) {
+                try {
+                    Object nested = candidate.startsWith("{")
+                            ? new JSONObject(candidate) : new JSONArray(candidate);
+                    return findPayloadRoute(
+                            context, packageName, nested, depth + 1, nodeCount);
+                } catch (Throwable ignored) {
+                    // Not nested JSON; continue with the safe no-route result.
+                }
+            }
+        }
+        return null;
+    }
+
+    private static boolean isPayloadRouteKey(String key) {
+        if (TextUtils.isEmpty(key)) {
+            return false;
+        }
+        String normalized = key.toLowerCase(Locale.ROOT);
+        return normalized.equals("url")
+                || normalized.equals("uri")
+                || normalized.equals("scheme")
+                || normalized.equals("jump_scheme")
+                || normalized.equals("intent_uri")
+                || normalized.equals("deep_link")
+                || normalized.equals("deeplink")
+                || normalized.equals("link")
+                || normalized.endsWith("_url")
+                || normalized.endsWith("_uri");
+    }
+
+    @Nullable
+    private static Intent resolvePayloadRoute(Context context, String packageName, String value) {
+        if (context == null || TextUtils.isEmpty(packageName) || TextUtils.isEmpty(value)) {
+            return null;
+        }
+        String route = value.trim();
+        if (route.length() == 0 || route.length() > PAYLOAD_ROUTE_MAX_LENGTH
+                || route.indexOf('\n') >= 0 || route.indexOf('\r') >= 0) {
+            return null;
+        }
+        try {
+            Intent intent;
+            if (route.startsWith("intent:")) {
+                intent = Intent.parseUri(route, Intent.URI_INTENT_SCHEME);
+            } else {
+                Uri uri = Uri.parse(route);
+                if (TextUtils.isEmpty(uri.getScheme())) {
+                    return null;
+                }
+                intent = new Intent(Intent.ACTION_VIEW, uri);
+            }
+            intent.setPackage(packageName);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ResolveInfo resolved = context.getPackageManager()
+                    .resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY);
+            if (!isResolvedActivityInTargetPackage(packageName, resolved)) {
+                return null;
+            }
+            return makeResolvedActivityExplicit(packageName, intent, resolved);
+        } catch (Throwable ignored) {
+            return null;
+        }
     }
 
     /**
