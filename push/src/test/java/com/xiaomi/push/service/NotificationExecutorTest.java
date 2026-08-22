@@ -102,11 +102,12 @@ public class NotificationExecutorTest {
         assertTrue(!MyMIPushNotificationHelper.shouldUseActivityClick(
                 Boolean.FALSE, true, activity));
 
-        // An absent setting opts MessagingStyle into the Activity path, while
-        // non-MessagingStyle notifications retain the service path.
+        // An absent setting uses the direct Activity path for both ordinary and
+        // MessagingStyle notifications. This avoids Android 16's background
+        // service-to-Activity launch restriction after a notification click.
         assertTrue(MyMIPushNotificationHelper.shouldUseActivityClick(
                 null, true, activity));
-        assertTrue(!MyMIPushNotificationHelper.shouldUseActivityClick(
+        assertTrue(MyMIPushNotificationHelper.shouldUseActivityClick(
                 null, false, activity));
 
         // No resolved target Activity must always use the safe service path,

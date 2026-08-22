@@ -14,6 +14,7 @@ import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.Icon;
 import android.net.Uri;
 import android.os.Build;
@@ -292,7 +293,7 @@ public class NotificationController {
                 metaInfo, configuration);
 
         if (includeFocusExtras && configuration != null) {
-            addFocusNotificationExtras(context, notificationBuilder, configuration);
+            addFocusNotificationExtras(context, packageName, notificationBuilder, configuration);
         }
 
         notificationBuilder.setAutoCancel(true);
@@ -715,6 +716,7 @@ public class NotificationController {
 
     private static void addFocusNotificationExtras(
             Context context,
+            String packageName,
             NotificationCompat.Builder notificationBuilder,
             CustomConfiguration configuration) {
         CustomConfiguration.FocusNotificationPayload payload =
@@ -742,18 +744,77 @@ public class NotificationController {
             // native focus renderer is unavailable.
             focusBundle.putString(picture.getKey(), picture.getValue());
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+        boolean appIconRequested = referencesApplicationIcon(configuration, payload);
+        Map<String, String> downloadablePictures =
+                new java.util.LinkedHashMap<>(payload.downloadPictureUrls());
+        // The app-icon alias is resolved locally from the target package.  Do
+        // not spend the image budget fetching a value supplied under that key
+        // (some producers send a stale URL there as a compatibility hint).
+        downloadablePictures.remove(FocusNotificationSafety.FOCUS_APP_ICON_PICTURE);
+        boolean nativePictureDownloadsEnabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
                 && isFocusProtocolEnabled(context)
-                && !payload.downloadPictureUrls().isEmpty()) {
+                && !downloadablePictures.isEmpty();
+        // The application icon is not a URL download.  Xiaomi's templates
+        // reference it by the literal alias from param_v2, so enrich it even
+        // when the ROM did not expose the optional protocol setting.  The
+        // bundle is still only attached on the Xiaomi focus path (the caller
+        // never invokes this method for portable/AOSP notifications).
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                && (nativePictureDownloadsEnabled || appIconRequested)) {
             // Native Icon enrichment is bounded (count, bytes, executor queue
             // and caller budget). Match official XMSF by doing this optional
             // download only when the ROM advertises notification_focus_protocol;
             // the parameter and URL aliases above remain available as the
             // legacy, no-download compatibility path on AOSP/unsupported ROMs.
-            focusBundle.putBundle(FOCUS_PICTURES,
-                    FocusIconApi23.downloadPictures(context, payload.downloadPictureUrls()));
+            Bundle picturesBundle = nativePictureDownloadsEnabled
+                    ? FocusIconApi23.downloadPictures(context, downloadablePictures)
+                    : new Bundle();
+            if (appIconRequested) {
+                // Keep the alias present even if package lookup fails.  The
+                // official renderer treats a present-but-null entry as a
+                // failed optional image and preserves the rest of the focus
+                // template; omitting the key can make param_v2 reject the
+                // entire focus notification on HyperOS.
+                picturesBundle.putParcelable(
+                        FocusNotificationSafety.FOCUS_APP_ICON_PICTURE,
+                        FocusIconApi23.loadApplicationIcon(context, packageName));
+            }
+            focusBundle.putBundle(FOCUS_PICTURES, picturesBundle);
         }
         notificationBuilder.addExtras(focusBundle);
+    }
+
+    /**
+     * Detect the launcher-icon alias both in the normal focus JSON and in the
+     * occasional legacy top-level {@code param_v2} extra emitted by Xiaomi
+     * push producers.  The latter is intentionally restricted to the two
+     * documented key spellings so arbitrary application metadata cannot turn
+     * on native icon work.
+     */
+    private static boolean referencesApplicationIcon(
+            CustomConfiguration configuration,
+            CustomConfiguration.FocusNotificationPayload payload) {
+        String alias = FocusNotificationSafety.FOCUS_APP_ICON_PICTURE;
+        if (payload.pictureUrls().containsKey(alias)
+                || payload.pictureUrls().containsValue(alias)
+                || FocusNotificationSafety.referencesPictureAlias(payload.parameter(), alias)
+                || FocusNotificationSafety.referencesPictureAlias(payload.customParameter(), alias)) {
+            return true;
+        }
+        try {
+            for (String key : configuration.keys()) {
+                if ("param_v2".equals(key) || "miui.focus.param_v2".equals(key)) {
+                    if (FocusNotificationSafety.referencesPictureAlias(
+                            configuration.get(key, null), alias)) {
+                        return true;
+                    }
+                }
+            }
+        } catch (Throwable error) {
+            // Optional metadata must never block the standard notification.
+            logger.w("Unable to inspect legacy focus param_v2 metadata", error);
+        }
+        return false;
     }
 
     private static boolean isFocusProtocolEnabled(Context context) {
@@ -814,6 +875,49 @@ public class NotificationController {
                     new LinkedBlockingQueue<>(30), threadFactory);
             executor.allowCoreThreadTimeOut(true);
             return executor;
+        }
+
+        /**
+         * Resolve the target application's launcher icon as a framework
+         * {@link Icon}.  HyperOS focus templates expect a native Icon in the
+         * {@code miui.focus.pics} Bundle; a Bitmap/Drawable or the regular
+         * notification largeIcon is not interchangeable there.
+         *
+         * <p>The common icon cache keeps this lookup bounded and avoids
+         * repeatedly decoding the same adaptive icon for bursts of push
+         * messages.  Failure is deliberately represented by {@code null}; the
+         * caller keeps the alias in the Bundle and the ordinary notification
+         * path remains intact.</p>
+         */
+        @Nullable
+        static Icon loadApplicationIcon(Context context, String packageName) {
+            if (context == null || TextUtils.isEmpty(packageName)) {
+                return null;
+            }
+            try {
+                Bitmap bitmap = Global.IconCache().getRawIconBitmap(context, packageName);
+                if (bitmap != null && !bitmap.isRecycled()) {
+                    return Icon.createWithBitmap(bitmap);
+                }
+            } catch (Throwable error) {
+                logger.w("Unable to resolve target app icon for focus notification", error);
+            }
+            // The shared cache may contain a bitmap that was trimmed/recycled
+            // by another notification style. Retry directly through the
+            // PackageManager before giving up so a transient cache state does
+            // not remove the app-icon alias from an otherwise valid focus
+            // notification.
+            try {
+                Drawable drawable = context.getPackageManager()
+                        .getApplicationIcon(packageName);
+                Bitmap bitmap = ImgUtils.drawableToBitmap(drawable);
+                if (bitmap != null && !bitmap.isRecycled()) {
+                    return Icon.createWithBitmap(bitmap);
+                }
+            } catch (Throwable error) {
+                logger.w("Unable to load target app icon from PackageManager", error);
+            }
+            return null;
         }
 
         static Bundle downloadPictures(

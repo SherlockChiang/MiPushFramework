@@ -93,6 +93,31 @@ public class FocusNotificationSafetyTest {
     }
 
     @Test
+    public void findsApplicationIconAliasInsideParamV2AndArrays() {
+        String parameter = "{\"business\":\"food_delivery\","
+                + "\"param_v2\":{\"image\":{\"pic\":\""
+                + FocusNotificationSafety.FOCUS_APP_ICON_PICTURE + "\"}},"
+                + "\"images\":[\"other\",\""
+                + FocusNotificationSafety.FOCUS_APP_ICON_PICTURE + "\"]}";
+
+        assertTrue(FocusNotificationSafety.referencesPictureAlias(
+                parameter, FocusNotificationSafety.FOCUS_APP_ICON_PICTURE));
+    }
+
+    @Test
+    public void applicationIconAliasDoesNotMatchMalformedOrSubstringValues() {
+        assertFalse(FocusNotificationSafety.referencesPictureAlias(
+                "{\"param_v2\":{\"pic\":\"miui.focus.pic_app_icon_extra\"}}",
+                FocusNotificationSafety.FOCUS_APP_ICON_PICTURE));
+        assertFalse(FocusNotificationSafety.referencesPictureAlias(
+                "not-json", FocusNotificationSafety.FOCUS_APP_ICON_PICTURE));
+        assertFalse(FocusNotificationSafety.referencesPictureAlias(
+                "{\"param_v2\":{\"pic\":\""
+                        + FocusNotificationSafety.FOCUS_APP_ICON_PICTURE + "\"}}",
+                ""));
+    }
+
+    @Test
     public void deeplyNestedJsonCannotBreakTheStandardFallback() {
         String deeplyNested = "[".repeat(1_200) + "0" + "]".repeat(1_200);
 

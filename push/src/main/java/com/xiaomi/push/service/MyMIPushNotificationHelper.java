@@ -748,10 +748,18 @@ public class MyMIPushNotificationHelper {
         intent.addCategory(String.valueOf(metaInfo.getNotifyId()));
 
         CustomConfiguration configuration = XMPushUtils.getConfiguration(metaInfo);
+        // Prefer a validated client Activity for every ordinary notification. The
+        // historical service PendingIntent requires a background service to call
+        // startActivity(), which Android 16/HyperOS may reject even though the
+        // notification click itself is user initiated. A package launcher is a
+        // safe fallback when the sender did not provide notify_effect metadata.
         Intent activityIntent = getSdkIntent(context, container);
-        // Keep the setting tri-state: an absent key means "use the
-        // MessagingStyle default", while an explicitly supplied false must
-        // continue to request the historical service PendingIntent.
+        if (activityIntent == null) {
+            activityIntent = getLaunchIntent(context, container.getPackageName());
+        }
+        // Keep the setting tri-state: an absent key selects the direct Activity
+        // path, while an explicitly supplied false can still request the
+        // historical service PendingIntent for compatibility.
         Boolean explicitSetting = configuration.keys().contains("use_clicked_activity")
                 ? configuration.useClickedActivity(false)
                 : null;
@@ -771,22 +779,54 @@ public class MyMIPushNotificationHelper {
     /**
      * HyperOS exposes the conversation mini-window affordance only when the
      * notification click is an Activity PendingIntent. Messaging notifications
-     * already carry a validated target Activity through their SDK intent, so
-     * they may use that path by default. Other notification types retain the
-     * historical service PendingIntent unless configuration explicitly opts in.
+     * already carry a validated target Activity through their SDK intent. All
+     * notification types use that path by default; the service PendingIntent is
+     * retained only when configuration explicitly opts out or no Activity can
+     * be resolved.
      */
     static boolean shouldUseActivityClick(
             @Nullable Boolean explicitSetting, boolean messagingStyle,
             @Nullable Intent activityIntent) {
         // A missing/invalid target can never be upgraded to an Activity
-        // PendingIntent. The caller supplies only intents already validated by
-        // getSdkIntent, while this guard keeps the fallback safe for all paths.
+        // PendingIntent. The caller supplies only intents validated against the
+        // target package, while this guard keeps the fallback safe for all paths.
         if (activityIntent == null) {
             return false;
         }
         // Explicit configuration always wins over the MessagingStyle default,
-        // including an explicit false.
-        return explicitSetting != null ? explicitSetting : messagingStyle;
+        // including an explicit false. An absent setting now uses the direct
+        // Activity path for both ordinary and MessagingStyle notifications;
+        // this is required for reliable Android 16 background-click handling.
+        return explicitSetting == null || explicitSetting;
+    }
+
+    /**
+     * Returns the target package's exported launcher Activity after checking the
+     * resolved component. This prevents an implicit launcher intent from being
+     * redirected to another package on unusual ROMs.
+     */
+    @Nullable
+    private static Intent getLaunchIntent(Context context, String packageName) {
+        if (context == null || TextUtils.isEmpty(packageName)) {
+            return null;
+        }
+        try {
+            Intent launchIntent = context.getPackageManager()
+                    .getLaunchIntentForPackage(packageName);
+            if (launchIntent == null) {
+                return null;
+            }
+            ResolveInfo resolved = context.getPackageManager()
+                    .resolveActivity(launchIntent, PackageManager.MATCH_DEFAULT_ONLY);
+            if (!isResolvedActivityInTargetPackage(packageName, resolved)) {
+                return null;
+            }
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            return launchIntent;
+        } catch (Throwable error) {
+            logger.w("Unable to resolve launcher Activity for " + packageName, error);
+            return null;
+        }
     }
 
     /**
@@ -874,6 +914,18 @@ public class MyMIPushNotificationHelper {
             ResolveInfo resolvedActivity = context.getPackageManager()
                     .resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY);
             if (isResolvedActivityInTargetPackage(pkgName, resolvedActivity)) {
+                // A package-only Intent is still implicit at PendingIntent send
+                // time. HyperOS/Android 16 may resolve it again under a
+                // different foreground policy (or reject it while the shade is
+                // closing), which makes a notification appear to do nothing.
+                // Freeze the component selected by PackageManager after the
+                // package ownership check so the user click has a deterministic
+                // destination. Keep the original action, data, flags and extras
+                // (QQ mqqwpa and Alipay alipays URIs both rely on them).
+                intent = makeResolvedActivityExplicit(pkgName, intent, resolvedActivity);
+                if (intent == null) {
+                    return null;
+                }
                 //TODO fixit
 
                 //we don't have RegSecret we cannot decode push action
@@ -887,6 +939,26 @@ public class MyMIPushNotificationHelper {
         }
 
         return null;
+    }
+
+    /**
+     * Converts a package-only click intent into the exact Activity selected by
+     * PackageManager. Keeping this small and side-effect free makes the
+     * security boundary easy to exercise in unit tests.
+     */
+    @Nullable
+    static Intent makeResolvedActivityExplicit(
+            String targetPackage, @Nullable Intent intent, @Nullable ResolveInfo resolvedActivity) {
+        if (intent == null
+                || !isResolvedActivityInTargetPackage(targetPackage, resolvedActivity)
+                || resolvedActivity.activityInfo.name == null
+                || resolvedActivity.activityInfo.name.length() == 0) {
+            return null;
+        }
+        intent.setComponent(new ComponentName(
+                resolvedActivity.activityInfo.packageName,
+                resolvedActivity.activityInfo.name));
+        return intent;
     }
 
     /**

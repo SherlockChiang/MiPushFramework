@@ -15,6 +15,13 @@ import java.nio.charset.StandardCharsets;
  */
 public final class FocusNotificationSafety {
     public static final String FOCUS_EXTRA_PREFIX = "miui.focus.";
+    /**
+     * Well-known image alias used by Xiaomi focus templates for the target
+     * application's launcher icon.  The alias is referenced from nested
+     * {@code param_v2} objects rather than necessarily being present as a
+     * top-level PushMetaInfo extra.
+     */
+    public static final String FOCUS_APP_ICON_PICTURE = "miui.focus.pic_app_icon";
     public static final int MAX_PARAMETER_BYTES = 3_072;
     public static final long IMAGE_ENRICHMENT_BUDGET_MILLIS = 700L;
 
@@ -96,6 +103,62 @@ public final class FocusNotificationSafety {
         } catch (Throwable ignored) {
             return false;
         }
+    }
+
+    /**
+     * Returns whether a bounded focus JSON payload references a picture alias.
+     *
+     * <p>HyperOS commonly stores the alias in {@code param_v2} several levels
+     * below the root (and some producers use an array).  Looking only at the
+     * top-level picture map therefore misses the application-icon request.
+     * This traversal is deliberately bounded so malformed/deep payloads cannot
+     * affect ordinary notification delivery.</p>
+     */
+    public static boolean referencesPictureAlias(String parameter, String alias) {
+        if (alias == null || alias.isEmpty() || !isWellFormedParameter(parameter)) {
+            return false;
+        }
+        try {
+            return referencesPictureAlias(JsonParser.parseString(parameter), alias, 0);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static boolean referencesPictureAlias(
+            JsonElement element, String alias, int depth) {
+        // A focus parameter is capped at 3 KiB, but a malicious sender can
+        // still construct thousands of nested arrays.  Keep this optional
+        // enhancement cheap and fail closed at a modest depth.
+        if (element == null || depth > 64) {
+            return false;
+        }
+        if (element.isJsonPrimitive()) {
+            try {
+                return element.getAsJsonPrimitive().isString()
+                        && alias.equals(element.getAsString());
+            } catch (Throwable ignored) {
+                return false;
+            }
+        }
+        if (element.isJsonArray()) {
+            for (JsonElement child : element.getAsJsonArray()) {
+                if (referencesPictureAlias(child, alias, depth + 1)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (element.isJsonObject()) {
+            for (java.util.Map.Entry<String, JsonElement> entry
+                    : element.getAsJsonObject().entrySet()) {
+                if (alias.equals(entry.getKey())
+                        || referencesPictureAlias(entry.getValue(), alias, depth + 1)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     public static boolean isFocusExtraKey(String key) {

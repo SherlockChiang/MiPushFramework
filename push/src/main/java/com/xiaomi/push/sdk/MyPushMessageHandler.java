@@ -225,7 +225,11 @@ public class MyPushMessageHandler extends IntentService {
                 if (intent == null) {
                     throw new RuntimeException("can not get default activity for " + targetPackage);
                 } else {
-                    intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                    // This method is invoked from an IntentService. Explicitly
+                    // mark the fallback launcher as a new task so the legacy
+                    // opt-out path remains valid on Android 16/HyperOS.
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                            | Intent.FLAG_ACTIVITY_SINGLE_TOP);
 
                     context.startActivity(intent);
                     logger.d(packageInfo(targetPackage, "start activity"));
@@ -243,8 +247,11 @@ public class MyPushMessageHandler extends IntentService {
 
                     if (i == (APP_CHECK_FRONT_MAX_RETRY / 2)) {
                         intent = getJumpIntentFromPkg(context, targetPackage);
-                        intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
-                        context.startActivity(intent);
+                        if (intent != null) {
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                                    | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                            context.startActivity(intent);
+                        }
                     }
                 }
 

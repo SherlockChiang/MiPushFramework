@@ -25,7 +25,11 @@ class RecentEventListPage : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        val packageName = intent.dataString!!
+        // The page is also a standalone entry point (for example from a
+        // launcher/debug action), so it may not have the package URI that the
+        // per-application settings page supplies. An absent URI means show all
+        // records instead of crashing before Compose is created.
+        val packageName = intent.dataString ?: ""
         setContent {
             Theme {
                 window.navigationBarColor = MiuixTheme.colorScheme.surfaceContainer.toArgb()

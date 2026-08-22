@@ -6,7 +6,18 @@
             android:name="${mipushReceivePermission}"
             android:protectionLevel="signature" />
 
+    <!--
+        HyperOS SystemUI resolves Xiaomi's focus-notification auth endpoint
+        by this permission/action pair.  Keep the stock protection level so
+        ordinary applications cannot use the endpoint; privileged SystemUI
+        already receives this permission on Xiaomi builds.
+    -->
+    <permission
+            android:name="com.xiaomi.xms.auth.permission.BIND_AUTH_SERVICE"
+            android:protectionLevel="signature|privileged" />
+
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="com.xiaomi.xms.auth.permission.BIND_AUTH_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
@@ -177,6 +188,17 @@
         <service
                 android:name=".push.service.HttpService"
                 android:exported="true" />
+
+        <!-- Compatibility endpoint used by the HyperOS focus renderer. -->
+        <service
+                android:name="com.xiaomi.xms.auth.AuthService"
+                android:exported="true"
+                android:permission="com.xiaomi.xms.auth.permission.BIND_AUTH_SERVICE"
+                android:process=":auth">
+            <intent-filter>
+                <action android:name="com.xiaomi.xms.auth.BIND_AUTH_SERVICE" />
+            </intent-filter>
+        </service>
 
         <service
                 android:name=".push.service.XMPushService"
