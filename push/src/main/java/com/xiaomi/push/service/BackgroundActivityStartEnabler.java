@@ -46,16 +46,28 @@ public class BackgroundActivityStartEnabler {
         final NotificationManager nm = Objects.requireNonNull(context.getSystemService(NotificationManager.class));
         String channelId = tryGetValidPushStatusChannelId(context, nm);
         if (channelId == null) return;
-        notifyPushStatusInitializing(context, channelId, nm);
-        scheduleCapture(nm, 5);
+        if (notifyPushStatusInitializing(context, channelId, nm)) {
+            scheduleCapture(nm, 5);
+        }
     }
 
-    private static void notifyPushStatusInitializing(Context context, String channelId, NotificationManager nm) {
+    private static boolean notifyPushStatusInitializing(Context context, String channelId, NotificationManager nm) {
         final Notification n = new Notification.Builder(context, channelId).setTimeoutAfter(5_000)  // Must be long enough for all retries.
                 .setContentTitle("Initializing...").setOngoing(true)        // To avoid being cancelled before capture
                 .setGroup(TAG).setGroupAlertBehavior(GROUP_ALERT_SUMMARY)   // Effectively mute this notification
                 .setSmallIcon(android.R.drawable.stat_notify_sync_noanim).build();
-        nm.notify(TAG, 0, n);
+        try {
+            nm.notify(TAG, 0, n);
+            return true;
+        } catch (SecurityException e) {
+            // Some HyperOS builds reject the self-attributed bootstrap
+            // notification when an Xposed notification bridge is not loaded
+            // in system_server. It is an internal five-second capture token;
+            // failing closed keeps the push service alive and simply disables
+            // the optional background-activity-start whitelist for this run.
+            Log.w(TAG, "Unable to post bootstrap notification; continuing without capture", e);
+            return false;
+        }
     }
 
     private static @Nullable String tryGetValidPushStatusChannelId(Context context, NotificationManager nm) {
