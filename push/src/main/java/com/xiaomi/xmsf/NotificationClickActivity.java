@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Intent;
+import android.content.pm.ResolveInfo;
 import android.os.Bundle;
 import android.util.Log;
 
@@ -31,6 +32,8 @@ public final class NotificationClickActivity extends Activity {
             "com.xiaomi.xmsf.extra.NOTIFICATION_TARGET_INTENT";
     public static final String EXTRA_SERVICE_INTENT =
             "com.xiaomi.xmsf.extra.NOTIFICATION_SERVICE_INTENT";
+    public static final String EXTRA_TARGET_ACTIVITY_PRIVATE =
+            "com.xiaomi.xmsf.extra.NOTIFICATION_TARGET_ACTIVITY_PRIVATE";
 
     private static final String TAG = "MiPushClick";
 
@@ -54,8 +57,17 @@ public final class NotificationClickActivity extends Activity {
         if (payload == null && serviceIntent != null) {
             payload = serviceIntent.getByteArrayExtra(PushConstants.MIPUSH_EXTRA_PAYLOAD);
         }
-        XmPushActionContainer container = XMPushUtils.packToContainer(payload);
+        XmPushActionContainer container = null;
+        if (payload != null && payload.length > 0) {
+            try {
+                container = XMPushUtils.packToContainer(payload);
+            } catch (Throwable decodeError) {
+                Log.w(TAG, "unable to decode notification click payload", decodeError);
+            }
+        }
         Intent targetIntent = getParcelable(clickIntent, EXTRA_TARGET_INTENT);
+        boolean targetActivityPrivate = clickIntent.getBooleanExtra(
+                EXTRA_TARGET_ACTIVITY_PRIVATE, false);
 
         try {
             if (container != null && payload != null) {
@@ -63,18 +75,31 @@ public final class NotificationClickActivity extends Activity {
                 // a user-initiated Activity instead of a background Service. Send
                 // the complete payload through the target SDK first, then open the
                 // sender-provided route (or the validated Launcher fallback).
-                MyPushMessageHandler.forwardToTargetApplication(this, payload);
-                startTargetActivity(targetIntent, clickIntent, container);
+                boolean forwarded = false;
+                try {
+                    forwarded = MyPushMessageHandler.forwardToTargetApplication(this, payload)
+                            != null;
+                    if (!forwarded) {
+                        Log.w(TAG, "target SDK click bridge returned no component");
+                    }
+                } catch (Throwable forwardError) {
+                    // A private proxy may not expose the MiPush bridge service.
+                    // Continue with the exported route/launcher fallback below.
+                    Log.w(TAG, "target SDK click bridge unavailable", forwardError);
+                }
+                if (!targetActivityPrivate || !forwarded) {
+                    startTargetActivity(targetIntent, clickIntent, container, targetActivityPrivate);
+                }
             } else {
                 // A malformed/stale click must still try the validated target route.
-                startTargetActivity(targetIntent, clickIntent, null);
+                startTargetActivity(targetIntent, clickIntent, null, targetActivityPrivate);
             }
         } catch (Throwable error) {
             Log.w(TAG, "notification click hand-off failed", error);
             try {
                 // If a target does not expose the MiPush service, the explicit route
                 // or launcher remains a safe user-visible fallback.
-                startTargetActivity(targetIntent, clickIntent, container);
+                startTargetActivity(targetIntent, clickIntent, container, targetActivityPrivate);
             } catch (Throwable fallbackError) {
                 Log.w(TAG, "notification click Activity fallback failed", fallbackError);
             }
@@ -95,13 +120,21 @@ public final class NotificationClickActivity extends Activity {
     private void startTargetActivity(
             @Nullable Intent targetIntent,
             Intent clickIntent,
-            @Nullable XmPushActionContainer container) {
-        Intent launch = targetIntent == null ? null : new Intent(targetIntent);
+            @Nullable XmPushActionContainer container,
+            boolean targetActivityPrivate) {
+        Intent launch = targetActivityPrivate
+                ? resolveExportedFallback(targetIntent, container)
+                : (targetIntent == null ? null : new Intent(targetIntent));
         if (launch == null && container != null && container.getPackageName() != null) {
             launch = getPackageManager().getLaunchIntentForPackage(container.getPackageName());
         }
         if (launch == null) {
             return;
+        }
+
+        if (targetActivityPrivate) {
+            Log.i(TAG, "private notification route replaced with exported target: "
+                    + launch.getComponent());
         }
 
         Intent serviceIntent = getParcelable(clickIntent, EXTRA_SERVICE_INTENT);
@@ -123,6 +156,50 @@ public final class NotificationClickActivity extends Activity {
             Log.w(TAG, "target Activity not found: " + component, error);
             throw error;
         }
+    }
+
+    /**
+     * Resolve a user-visible route without ever attempting to start the
+     * sender's private proxy Activity.  Clearing an explicit component keeps
+     * its action/data/extras (for example a vendor deep link) and lets the
+     * package manager select an exported handler in the same target package.
+     * If no such handler exists, the caller falls back to the package launcher.
+     */
+    @Nullable
+    private Intent resolveExportedFallback(
+            @Nullable Intent targetIntent,
+            @Nullable XmPushActionContainer container) {
+        if (targetIntent == null) {
+            return null;
+        }
+
+        String targetPackage = container == null ? null : container.getPackageName();
+        ComponentName explicit = targetIntent.getComponent();
+        if (targetPackage == null && explicit != null) {
+            targetPackage = explicit.getPackageName();
+        }
+
+        Intent candidate = new Intent(targetIntent);
+        if (explicit != null) {
+            // Do not leak a cross-package component from malformed payloads.
+            if (targetPackage == null || !targetPackage.equals(explicit.getPackageName())) {
+                return null;
+            }
+            candidate.setComponent(null);
+            candidate.setPackage(targetPackage);
+        }
+
+        ResolveInfo resolved = getPackageManager().resolveActivity(
+                candidate, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY);
+        if (resolved == null || resolved.activityInfo == null
+                || !resolved.activityInfo.exported
+                || (targetPackage != null
+                && !targetPackage.equals(resolved.activityInfo.packageName))) {
+            return null;
+        }
+        candidate.setComponent(new ComponentName(
+                resolved.activityInfo.packageName, resolved.activityInfo.name));
+        return candidate;
     }
 
     @SuppressWarnings("deprecation")

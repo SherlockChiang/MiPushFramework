@@ -779,26 +779,54 @@ public class MyMIPushNotificationHelper {
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         }
 
-        // A direct target Activity skips the MiPush SDK's notification-click
-        // callback. Use a transparent XMSF trampoline so every client receives
-        // the original service intent first, while the sender-provided target
-        // Activity remains the final destination. This is deliberately generic:
-        // no package name or vendor Activity is recognized here.
-        Intent clickTrampoline = new Intent(context,
-                com.xiaomi.xmsf.NotificationClickActivity.class);
-        clickTrampoline.putExtra(
-                com.xiaomi.xmsf.NotificationClickActivity.EXTRA_TARGET_INTENT,
-                activityIntent);
-        clickTrampoline.putExtra(
-                com.xiaomi.xmsf.NotificationClickActivity.EXTRA_SERVICE_INTENT,
-                intent);
-        // The payload is already carried by EXTRA_SERVICE_INTENT. Do not copy
-        // it again into the outer Intent: large focus payloads can otherwise
-        // exceed Android's Binder transaction limit when SystemUI sends the
-        // PendingIntent.
-        clickTrampoline.putExtras(extra);
-        return PendingIntent.getActivity(context, notificationId, clickTrampoline,
+        // A sender may publish a private proxy Activity (the common pattern for
+        // MiPush bridge implementations). XMSF cannot start a non-exported
+        // Activity because Android enforces the target UID at PendingIntent
+        // send time. Route those clicks through the target app's exported
+        // PushMessageHandler instead; the SDK then starts its private proxy
+        // from inside the target UID. Exported routes continue to use the
+        // direct Activity PendingIntent so HyperOS can provide its normal
+        // conversation/floating-window affordances.
+        if (!isActivityExported(context, activityIntent)) {
+            Intent clickTrampoline = new Intent(context,
+                    com.xiaomi.xmsf.NotificationClickActivity.class);
+            clickTrampoline.putExtra(
+                    com.xiaomi.xmsf.NotificationClickActivity.EXTRA_TARGET_INTENT,
+                    activityIntent);
+            clickTrampoline.putExtra(
+                    com.xiaomi.xmsf.NotificationClickActivity.EXTRA_SERVICE_INTENT,
+                    intent);
+            clickTrampoline.putExtra(
+                    com.xiaomi.xmsf.NotificationClickActivity.EXTRA_TARGET_ACTIVITY_PRIVATE,
+                    true);
+            clickTrampoline.putExtras(extra);
+            return PendingIntent.getActivity(context, notificationId, clickTrampoline,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        }
+
+        // Keep the official MiPush click contract for exported routes: launch
+        // the validated client Activity directly and attach the original
+        // service Intent under the standard bridge key. This remains
+        // package-agnostic: only the sender-provided Activity and common
+        // MiPush service payload are forwarded.
+        activityIntent.putExtra("mipush_serviceIntent", intent);
+        activityIntent.putExtras(intent);
+        return PendingIntent.getActivity(context, notificationId, activityIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    private static boolean isActivityExported(Context context, @Nullable Intent activityIntent) {
+        if (context == null || activityIntent == null) {
+            return false;
+        }
+        try {
+            ResolveInfo resolved = context.getPackageManager()
+                    .resolveActivity(activityIntent, PackageManager.MATCH_DEFAULT_ONLY);
+            return resolved != null && resolved.activityInfo != null
+                    && resolved.activityInfo.exported;
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     /**
@@ -938,16 +966,26 @@ public class MyMIPushNotificationHelper {
         //
         // An explicit notify_effect/intent_uri is the sender's official bridge
         // contract. Keep it authoritative: proxy Activities such as Tieba's
-        // XmNotifyActivity consume the complete MiPush click extras, whereas a
-        // seemingly equivalent URI found inside the payload may bypass that
-        // bridge and become a no-op. Payload routing is therefore a fallback,
-        // not an override, whenever the SDK supplied an explicit route.
+        // XmNotifyActivity normally consume the complete MiPush click extras.
+        // A few clients publish a private proxy, however. XMSF cannot launch
+        // that Activity under its own UID, so an exported route discovered in
+        // the encrypted payload is safer and more useful than retaining an
+        // unusable private component. Keep the official route for exported
+        // Activities; only private routes may be replaced by an exported
+        // payload deep link.
         Intent payloadIntent = getPayloadRouteIntent(context, container);
         // A default-launcher effect is only a generic fallback. If the client
         // also supplied a concrete deep link in its encrypted payload, prefer
-        // that link; explicit intent/class/web effects remain authoritative.
+        // that link. Explicit routes remain authoritative while they resolve
+        // to an exported Activity; private routes are replaced above.
         Intent authoritativeSdkRoute =
                 PushConstants.NOTIFICATION_CLICK_DEFAULT.equals(typeId) ? null : intent;
+        if (authoritativeSdkRoute != null
+                && payloadIntent != null
+                && !isActivityExported(context, authoritativeSdkRoute)
+                && isActivityExported(context, payloadIntent)) {
+            authoritativeSdkRoute = payloadIntent;
+        }
         intent = chooseClickRoute(authoritativeSdkRoute, payloadIntent);
 
 
