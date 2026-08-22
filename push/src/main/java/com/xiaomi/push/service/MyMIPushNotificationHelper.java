@@ -85,6 +85,8 @@ import top.trumeet.mipush.provider.entities.RegisteredApplication;
  */
 
 public class MyMIPushNotificationHelper {
+    private static final String EXTRA_ACTIVITY_CLICK_PENDING_INTENT =
+            "com.xiaomi.xmsf.extra.NOTIFICATION_ACTIVITY_CLICK_PENDING_INTENT";
 
     public static final String CLASS_NAME_PUSH_MESSAGE_HANDLER = "com.xiaomi.mipush.sdk.PushMessageHandler";
     private static Logger logger = XLog.tag("MyNotificationHelper").build();
@@ -375,7 +377,13 @@ public class MyMIPushNotificationHelper {
 
         if (localPendingIntent != null) {
             notificationBuilder.setContentIntent(localPendingIntent);
-            carryPendingIntentForTemporarilyWhitelisted(context, container, notificationBuilder);
+            // The temporary-whitelist service PendingIntent is only needed for
+            // the legacy Service click path. Carrying it alongside an Activity
+            // click can make HyperOS wake the target service and the target
+            // Activity together, producing a visible hand-off pause.
+            if (!intentExtra.getBooleanExtra(EXTRA_ACTIVITY_CLICK_PENDING_INTENT, false)) {
+                carryPendingIntentForTemporarilyWhitelisted(context, container, notificationBuilder);
+            }
         }
         return new NotificationInfo(notificationId, notificationBuilder);
     }
@@ -742,6 +750,7 @@ public class MyMIPushNotificationHelper {
             Intent intent = new Intent("android.intent.action.VIEW");
             intent.setData(Uri.parse(urlJump));
             intent.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
+            extra.putBoolean(EXTRA_ACTIVITY_CLICK_PENDING_INTENT, true);
             return PendingIntent.getActivity(context, notificationId, intent,
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         }
@@ -800,6 +809,7 @@ public class MyMIPushNotificationHelper {
                     com.xiaomi.xmsf.NotificationClickActivity.EXTRA_TARGET_ACTIVITY_PRIVATE,
                     true);
             clickTrampoline.putExtras(extra);
+            extra.putBoolean(EXTRA_ACTIVITY_CLICK_PENDING_INTENT, true);
             return PendingIntent.getActivity(context, notificationId, clickTrampoline,
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         }
@@ -811,6 +821,7 @@ public class MyMIPushNotificationHelper {
         // MiPush service payload are forwarded.
         activityIntent.putExtra("mipush_serviceIntent", intent);
         activityIntent.putExtras(intent);
+        extra.putBoolean(EXTRA_ACTIVITY_CLICK_PENDING_INTENT, true);
         return PendingIntent.getActivity(context, notificationId, activityIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
