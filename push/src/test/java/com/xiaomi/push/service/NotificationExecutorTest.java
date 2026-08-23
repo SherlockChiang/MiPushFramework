@@ -136,4 +136,18 @@ public class NotificationExecutorTest {
                 null, payloadDeepLink));
         assertSame(null, MyMIPushNotificationHelper.chooseClickRoute(null, null));
     }
+
+    @Test
+    public void focusRouteIsPreferredBeforeEncryptedPayloadFallback() {
+        Intent focusDeepLink = new Intent("focus-deep-link");
+        Intent payloadDeepLink = new Intent("payload-deep-link");
+        Intent officialBridge = new Intent("official-bridge");
+
+        assertTrue(focusDeepLink == MyMIPushNotificationHelper.chooseClickRoute(
+                null, focusDeepLink, payloadDeepLink));
+        assertTrue(officialBridge == MyMIPushNotificationHelper.chooseClickRoute(
+                officialBridge, focusDeepLink, payloadDeepLink));
+        assertTrue(payloadDeepLink == MyMIPushNotificationHelper.chooseClickRoute(
+                null, null, payloadDeepLink));
+    }
 }

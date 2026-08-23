@@ -969,6 +969,13 @@ public class MyMIPushNotificationHelper {
             }
         }
 
+        // Focus notifications may carry the actual detail page in the public
+        // miui.focus.param JSON instead of the ordinary MiPush click fields.
+        // Resolve that route before falling back to the encrypted message
+        // payload; this is generic and keeps delivery pages usable for every
+        // sender that follows the focus protocol.
+        Intent focusIntent = getFocusRouteIntent(context, container);
+
         // Some SDKs keep the actual deep link in the encrypted SendMessage
         // payload rather than in metaInfo.extra. Decode it with the stored
         // registration secret and inspect only documented route-like fields;
@@ -992,12 +999,18 @@ public class MyMIPushNotificationHelper {
         Intent authoritativeSdkRoute =
                 PushConstants.NOTIFICATION_CLICK_DEFAULT.equals(typeId) ? null : intent;
         if (authoritativeSdkRoute != null
+                && focusIntent != null
+                && !isActivityExported(context, authoritativeSdkRoute)
+                && isActivityExported(context, focusIntent)) {
+            authoritativeSdkRoute = focusIntent;
+        }
+        if (authoritativeSdkRoute != null
                 && payloadIntent != null
                 && !isActivityExported(context, authoritativeSdkRoute)
                 && isActivityExported(context, payloadIntent)) {
             authoritativeSdkRoute = payloadIntent;
         }
-        intent = chooseClickRoute(authoritativeSdkRoute, payloadIntent);
+        intent = chooseClickRoute(authoritativeSdkRoute, focusIntent, payloadIntent);
 
 
         if (intent != null) {
@@ -1047,7 +1060,54 @@ public class MyMIPushNotificationHelper {
     @Nullable
     static Intent chooseClickRoute(
             @Nullable Intent explicitSdkRoute, @Nullable Intent payloadRoute) {
-        return explicitSdkRoute != null ? explicitSdkRoute : payloadRoute;
+        return chooseClickRoute(explicitSdkRoute, null, payloadRoute);
+    }
+
+    /**
+     * Select the sender's explicit route, then a public focus-protocol route,
+     * then a route discovered in the encrypted application payload.
+     */
+    @Nullable
+    static Intent chooseClickRoute(
+            @Nullable Intent explicitSdkRoute,
+            @Nullable Intent focusRoute,
+            @Nullable Intent payloadRoute) {
+        if (explicitSdkRoute != null) {
+            return explicitSdkRoute;
+        }
+        return focusRoute != null ? focusRoute : payloadRoute;
+    }
+
+    @Nullable
+    private static Intent getFocusRouteIntent(
+            Context context, XmPushActionContainer container) {
+        if (context == null || container == null || TextUtils.isEmpty(container.packageName)) {
+            return null;
+        }
+        try {
+            CustomConfiguration configuration =
+                    XMPushUtils.getConfiguration(container.getMetaInfo());
+            String[] parameters = {
+                    configuration.focusParam(null),
+                    configuration.focusParamCustom(null)
+            };
+            for (String parameter : parameters) {
+                if (!FocusNotificationSafety.isWellFormedParameter(parameter)) {
+                    continue;
+                }
+                Intent route = findPayloadRoute(
+                        context, container.packageName, new JSONObject(parameter), 0,
+                        new int[]{0});
+                if (route != null) {
+                    return route;
+                }
+            }
+        } catch (Throwable error) {
+            // Focus routing is optional. A malformed or unsupported focus
+            // payload must retain the normal MiPush click fallback.
+            logger.d("Unable to decode a focus notification click route");
+        }
+        return null;
     }
 
     @Nullable
