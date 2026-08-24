@@ -771,7 +771,8 @@ public class MyMIPushNotificationHelper {
         // startActivity(), which Android 16/HyperOS may reject even though the
         // notification click itself is user initiated. A package launcher is a
         // safe fallback when the sender did not provide notify_effect metadata.
-        Intent activityIntent = getSdkIntent(context, container);
+        ClickRouteResolution clickRoute = resolveSdkClickRoute(context, container);
+        Intent activityIntent = clickRoute == null ? null : clickRoute.intent;
         if (activityIntent == null) {
             activityIntent = getLaunchIntent(context, container.getPackageName());
         }
@@ -814,16 +815,29 @@ public class MyMIPushNotificationHelper {
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         }
 
-        // Keep the official MiPush click contract for exported routes: launch
-        // the validated client Activity directly and attach the original
-        // service Intent under the standard bridge key. This remains
-        // package-agnostic: only the sender-provided Activity and common
-        // MiPush service payload are forwarded.
-        activityIntent.putExtra("mipush_serviceIntent", intent);
-        activityIntent.putExtras(intent);
+        // Keep the official MiPush click contract for sender-declared routes
+        // and launcher fallback: launch the validated client Activity directly
+        // and attach the original service Intent under the standard bridge key.
+        // Focus/payload-discovered deep links are already complete routes and
+        // must remain free of unrelated MiPush bridge extras.
+        if (shouldAttachMiPushBridgeExtras(
+                clickRoute != null && clickRoute.discoveredRoute)) {
+            activityIntent.putExtra("mipush_serviceIntent", intent);
+            activityIntent.putExtras(intent);
+        }
         extra.putBoolean(EXTRA_ACTIVITY_CLICK_PENDING_INTENT, true);
         return PendingIntent.getActivity(context, notificationId, activityIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    /**
+     * Sender-declared routes and launcher fallback consume the original MiPush
+     * bridge payload. Routes inferred from focus parameters or encrypted
+     * application payloads are already complete deep links and must stay clean,
+     * matching the target application's own notification PendingIntent.
+     */
+    static boolean shouldAttachMiPushBridgeExtras(boolean discoveredRoute) {
+        return !discoveredRoute;
     }
 
     private static boolean isActivityExported(Context context, @Nullable Intent activityIntent) {
@@ -897,6 +911,13 @@ public class MyMIPushNotificationHelper {
      * @see PushMessageProcessor#getNotificationMessageIntent
      */
     public static Intent getSdkIntent(Context context, XmPushActionContainer container) {
+        ClickRouteResolution route = resolveSdkClickRoute(context, container);
+        return route == null ? null : route.intent;
+    }
+
+    @Nullable
+    private static ClickRouteResolution resolveSdkClickRoute(
+            Context context, XmPushActionContainer container) {
         if (context == null || container == null || TextUtils.isEmpty(container.packageName)) {
             return null;
         }
@@ -1014,6 +1035,10 @@ public class MyMIPushNotificationHelper {
 
 
         if (intent != null) {
+            boolean discoveredRoute = isDiscoveredClickRoute(
+                    intent, focusIntent, payloadIntent);
+            // Activity PendingIntents use the standard target-task contract.
+            // addFlags preserves all flags explicitly supplied by the sender.
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             ResolveInfo resolvedActivity = context.getPackageManager()
                     .resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY);
@@ -1034,11 +1059,21 @@ public class MyMIPushNotificationHelper {
                     return null;
                 }
 
-                return intent;
+                return new ClickRouteResolution(intent, discoveredRoute);
             }
         }
 
         return null;
+    }
+
+    private static final class ClickRouteResolution {
+        final Intent intent;
+        final boolean discoveredRoute;
+
+        ClickRouteResolution(Intent intent, boolean discoveredRoute) {
+            this.intent = intent;
+            this.discoveredRoute = discoveredRoute;
+        }
     }
 
     private static final int PAYLOAD_ROUTE_MAX_DEPTH = 8;
@@ -1076,6 +1111,18 @@ public class MyMIPushNotificationHelper {
             return explicitSdkRoute;
         }
         return focusRoute != null ? focusRoute : payloadRoute;
+    }
+
+    /**
+     * Route selection intentionally preserves object identity so the caller can
+     * distinguish an SDK-declared bridge from a deep link inferred by XMSF.
+     */
+    static boolean isDiscoveredClickRoute(
+            @Nullable Intent selectedRoute,
+            @Nullable Intent focusRoute,
+            @Nullable Intent payloadRoute) {
+        return selectedRoute != null
+                && (selectedRoute == focusRoute || selectedRoute == payloadRoute);
     }
 
     @Nullable
@@ -1238,7 +1285,6 @@ public class MyMIPushNotificationHelper {
                 intent = new Intent(Intent.ACTION_VIEW, uri);
             }
             intent.setPackage(packageName);
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             ResolveInfo resolved = context.getPackageManager()
                     .resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY);
             if (!isResolvedActivityInTargetPackage(packageName, resolved)) {

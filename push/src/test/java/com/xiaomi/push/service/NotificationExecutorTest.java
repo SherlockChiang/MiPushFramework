@@ -150,4 +150,26 @@ public class NotificationExecutorTest {
         assertTrue(payloadDeepLink == MyMIPushNotificationHelper.chooseClickRoute(
                 null, null, payloadDeepLink));
     }
+
+    @Test
+    public void discoveredDeepLinksDoNotReceiveMiPushBridgeExtras() {
+        assertTrue(MyMIPushNotificationHelper.shouldAttachMiPushBridgeExtras(false));
+        assertTrue(!MyMIPushNotificationHelper.shouldAttachMiPushBridgeExtras(true));
+    }
+
+    @Test
+    public void clickRouteOriginUsesSelectedIntentIdentity() {
+        Intent officialBridge = new Intent("official-bridge");
+        Intent focusDeepLink = new Intent("focus-deep-link");
+        Intent payloadDeepLink = new Intent("payload-deep-link");
+
+        assertTrue(!MyMIPushNotificationHelper.isDiscoveredClickRoute(
+                officialBridge, focusDeepLink, payloadDeepLink));
+        assertTrue(MyMIPushNotificationHelper.isDiscoveredClickRoute(
+                focusDeepLink, focusDeepLink, payloadDeepLink));
+        assertTrue(MyMIPushNotificationHelper.isDiscoveredClickRoute(
+                payloadDeepLink, focusDeepLink, payloadDeepLink));
+        assertTrue(!MyMIPushNotificationHelper.isDiscoveredClickRoute(
+                null, focusDeepLink, payloadDeepLink));
+    }
 }
