@@ -78,6 +78,8 @@
 - 配置文件都有什么作用？我应该使用配置文件吗？
     - 配置文件可以修改消息的标题、内容及样式等，控制收到消息时忽略、亮屏或自动弹出等
     - 目前大部分“官方”配置都可以无脑使用，部分配置是否要使用，参见[仓库说明](https://github.com/NihilityT/MiPushConfigurations)、配置名或配置中的 description 字段
+    - 应用原始推送中可用的点击路由默认优先于配置文件对 `url`、`notify_effect`、`intent_uri`、`class_name`、`web_uri` 或 `intent_flag` 的改写，以保留应用自己的页面跳转与返回栈
+    - 如果配置确实需要替换点击路由，请同时在 `newMetaInfo.extra` 中写入 `"__mi_push_allow_click_route_rewrite": "true"`；框架仍会校验目标 Activity 属于通知对应的应用
 
 
 - 是否应该安装为系统应用？

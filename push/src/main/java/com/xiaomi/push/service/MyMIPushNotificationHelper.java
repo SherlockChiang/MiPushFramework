@@ -69,6 +69,7 @@ import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -123,6 +124,21 @@ public class MyMIPushNotificationHelper {
     private static final String NOTIFICATION_STYLE_BUTTON_RIGHT_NOTIFY_EFFECT = "notification_style_button_right_notify_effect";
     private static final String NOTIFICATION_STYLE_BUTTON_RIGHT_WEB_URI = "notification_style_button_right_web_uri";
     private static final String NOTIFICATION_STYLE_TYPE = "notification_style_type";
+    /**
+     * Configuration files may intentionally replace a sender-declared click
+     * route by setting this key to the literal value {@code true}. Without this
+     * opt-in, a rewritten route is treated as presentation-only configuration
+     * whenever the original sender route is still safe and usable.
+     */
+    static final String ALLOW_CLICK_ROUTE_REWRITE =
+            "__mi_push_allow_click_route_rewrite";
+    private static final String[] CLICK_ROUTE_EXTRA_KEYS = {
+            PushConstants.EXTRA_PARAM_NOTIFY_EFFECT,
+            PushConstants.EXTRA_PARAM_INTENT_URI,
+            PushConstants.EXTRA_PARAM_CLASS_NAME,
+            PushConstants.EXTRA_PARAM_WEB_URI,
+            PushConstants.EXTRA_PARAM_INTENT_FLAG
+    };
     private static final StyleActionKeys LEFT_ACTION_KEYS = new StyleActionKeys(
             NOTIFICATION_STYLE_BUTTON_LEFT_NOTIFY_EFFECT,
             NOTIFICATION_STYLE_BUTTON_LEFT_INTENT_URI,
@@ -738,6 +754,12 @@ public class MyMIPushNotificationHelper {
             return null;
         }
 
+        // Resolve a safe sender-declared route before the legacy web shortcut:
+        // a configuration may have replaced an SDK intent with a URL, and the
+        // shortcut would otherwise make that replacement impossible to audit.
+        ClickRouteResolution restoredSenderRoute = resolveRestoredSenderClickRoute(
+                context, container, decryptedContent);
+
         //Jump web
         String urlJump = null;
         if (!TextUtils.isEmpty(metaInfo.url)) {
@@ -746,7 +768,7 @@ public class MyMIPushNotificationHelper {
             urlJump = metaInfo.getExtra().get(PushConstants.EXTRA_PARAM_WEB_URI);
         }
 
-        if (!TextUtils.isEmpty(urlJump)) {
+        if (restoredSenderRoute == null && !TextUtils.isEmpty(urlJump)) {
             Intent intent = new Intent("android.intent.action.VIEW");
             intent.setData(Uri.parse(urlJump));
             intent.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
@@ -771,7 +793,8 @@ public class MyMIPushNotificationHelper {
         // startActivity(), which Android 16/HyperOS may reject even though the
         // notification click itself is user initiated. A package launcher is a
         // safe fallback when the sender did not provide notify_effect metadata.
-        ClickRouteResolution clickRoute = resolveSdkClickRoute(context, container);
+        ClickRouteResolution clickRoute = restoredSenderRoute != null
+                ? restoredSenderRoute : resolveSdkClickRoute(context, container);
         Intent activityIntent = clickRoute == null ? null : clickRoute.intent;
         if (activityIntent == null) {
             activityIntent = getLaunchIntent(context, container.getPackageName());
@@ -838,6 +861,77 @@ public class MyMIPushNotificationHelper {
      */
     static boolean shouldAttachMiPushBridgeExtras(boolean discoveredRoute) {
         return !discoveredRoute;
+    }
+
+    /**
+     * Preserve the sender's navigation contract when a presentation
+     * configuration rewrites click metadata. External deep links can open the
+     * correct detail page but make it the root of a new task; the sender's
+     * official bridge retains application-specific routing and back-stack
+     * behavior. A configuration can explicitly opt into its replacement route
+     * through {@link #ALLOW_CLICK_ROUTE_REWRITE}.
+     */
+    @Nullable
+    private static ClickRouteResolution resolveRestoredSenderClickRoute(
+            Context context, XmPushActionContainer configuredContainer,
+            @Nullable byte[] originalPayload) {
+        XmPushActionContainer senderContainer = null;
+        try {
+            senderContainer = XMPushUtils.packToContainer(originalPayload);
+        } catch (Throwable error) {
+            logger.d("Unable to restore sender notification click metadata");
+        }
+
+        if (senderContainer != null
+                && configuredContainer != null
+                && Objects.equals(senderContainer.getPackageName(),
+                configuredContainer.getPackageName())
+                && shouldPreferSenderClickContract(
+                senderContainer.getMetaInfo(), configuredContainer.getMetaInfo())) {
+            ClickRouteResolution senderRoute =
+                    resolveSdkClickRoute(context, senderContainer);
+            if (senderRoute != null
+                    && !senderRoute.discoveredRoute
+                    && isActivityExported(context, senderRoute.intent)) {
+                logger.d("Restoring sender-declared notification click route for "
+                        + configuredContainer.getPackageName());
+                return senderRoute;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Returns whether configuration changed fields that define the notification
+     * click contract and did not explicitly opt into that rewrite. Styling,
+     * grouping and focus-rendering metadata are deliberately ignored.
+     */
+    static boolean shouldPreferSenderClickContract(
+            @Nullable PushMetaInfo senderMeta,
+            @Nullable PushMetaInfo configuredMeta) {
+        if (senderMeta == null || configuredMeta == null) {
+            return false;
+        }
+        Map<String, String> configuredExtra = configuredMeta.getExtra();
+        String rewriteOptIn = configuredExtra == null
+                ? null : configuredExtra.get(ALLOW_CLICK_ROUTE_REWRITE);
+        if (rewriteOptIn != null
+                && "true".equalsIgnoreCase(rewriteOptIn.trim())) {
+            return false;
+        }
+        if (!Objects.equals(senderMeta.url, configuredMeta.url)) {
+            return true;
+        }
+        Map<String, String> senderExtra = senderMeta.getExtra();
+        for (String key : CLICK_ROUTE_EXTRA_KEYS) {
+            String senderValue = senderExtra == null ? null : senderExtra.get(key);
+            String configuredValue =
+                    configuredExtra == null ? null : configuredExtra.get(key);
+            if (!Objects.equals(senderValue, configuredValue)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean isActivityExported(Context context, @Nullable Intent activityIntent) {

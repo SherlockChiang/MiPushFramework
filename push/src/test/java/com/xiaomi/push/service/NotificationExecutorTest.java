@@ -6,6 +6,7 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 import com.elvishew.xlog.XLog;
+import com.xiaomi.xmpush.thrift.PushMetaInfo;
 
 import android.content.pm.ActivityInfo;
 import android.content.Intent;
@@ -14,6 +15,7 @@ import android.content.pm.ResolveInfo;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.util.HashMap;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -158,6 +160,83 @@ public class NotificationExecutorTest {
     }
 
     @Test
+    public void configuredClickRewritePrefersSenderContractByDefault() {
+        PushMetaInfo sender = clickMeta(
+                "2",
+                "intent:#Intent;action=com.example.third.push;S.message=42;end");
+        PushMetaInfo configured = clickMeta(
+                "2",
+                "example://conversation/42");
+
+        assertTrue(MyMIPushNotificationHelper.shouldPreferSenderClickContract(
+                sender, configured));
+    }
+
+    @Test
+    public void unchangedClickContractIgnoresPresentationRewrites() {
+        PushMetaInfo sender = clickMeta("2", "example://conversation/42");
+        PushMetaInfo configured = clickMeta("2", "example://conversation/42");
+        configured.extra.put("channel_name", "Direct messages");
+        configured.extra.put("__mi_push_use_messaging_style", "true");
+
+        assertTrue(!MyMIPushNotificationHelper.shouldPreferSenderClickContract(
+                sender, configured));
+    }
+
+    @Test
+    public void configuredClickRewriteCanBeExplicitlyAllowed() {
+        PushMetaInfo sender = clickMeta(
+                "2",
+                "intent:#Intent;action=com.example.third.push;S.message=42;end");
+        PushMetaInfo configured = clickMeta("2", "example://conversation/42");
+        configured.extra.put(
+                MyMIPushNotificationHelper.ALLOW_CLICK_ROUTE_REWRITE, " TRUE ");
+
+        assertTrue(!MyMIPushNotificationHelper.shouldPreferSenderClickContract(
+                sender, configured));
+
+        for (String value : new String[]{"false", "1", ""}) {
+            configured.extra.put(
+                    MyMIPushNotificationHelper.ALLOW_CLICK_ROUTE_REWRITE, value);
+            assertTrue(value, MyMIPushNotificationHelper
+                    .shouldPreferSenderClickContract(sender, configured));
+        }
+    }
+
+    @Test
+    public void everyPrimaryClickFieldParticipatesInRewriteDetection() {
+        String[] keys = {
+                "notify_effect", "intent_uri", "class_name",
+                "web_uri", "intent_flag"
+        };
+        for (String key : keys) {
+            PushMetaInfo sender = new PushMetaInfo();
+            sender.extra = new HashMap<>();
+            PushMetaInfo configured = new PushMetaInfo();
+            configured.extra = new HashMap<>();
+            sender.extra.put(key, "sender-value");
+            configured.extra.put(key, "configured-value");
+
+            assertTrue(key, MyMIPushNotificationHelper
+                    .shouldPreferSenderClickContract(sender, configured));
+        }
+    }
+
+    @Test
+    public void senderClickContractComparisonIsNullSafe() {
+        PushMetaInfo sender = new PushMetaInfo();
+        PushMetaInfo configured = new PushMetaInfo();
+
+        assertTrue(!MyMIPushNotificationHelper.shouldPreferSenderClickContract(
+                sender, configured));
+        sender.url = "https://example.test/detail/42";
+        assertTrue(MyMIPushNotificationHelper.shouldPreferSenderClickContract(
+                sender, configured));
+        assertTrue(!MyMIPushNotificationHelper.shouldPreferSenderClickContract(
+                null, configured));
+    }
+
+    @Test
     public void clickRouteOriginUsesSelectedIntentIdentity() {
         Intent officialBridge = new Intent("official-bridge");
         Intent focusDeepLink = new Intent("focus-deep-link");
@@ -171,5 +250,13 @@ public class NotificationExecutorTest {
                 payloadDeepLink, focusDeepLink, payloadDeepLink));
         assertTrue(!MyMIPushNotificationHelper.isDiscoveredClickRoute(
                 null, focusDeepLink, payloadDeepLink));
+    }
+
+    private static PushMetaInfo clickMeta(String notifyEffect, String intentUri) {
+        PushMetaInfo metaInfo = new PushMetaInfo();
+        metaInfo.extra = new HashMap<>();
+        metaInfo.extra.put("notify_effect", notifyEffect);
+        metaInfo.extra.put("intent_uri", intentUri);
+        return metaInfo;
     }
 }
