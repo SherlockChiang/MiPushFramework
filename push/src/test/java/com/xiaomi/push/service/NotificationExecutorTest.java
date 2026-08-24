@@ -126,14 +126,14 @@ public class NotificationExecutorTest {
         Intent officialBridge = new Intent("official-bridge");
         Intent payloadDeepLink = new Intent("payload-deep-link");
 
-        // Tieba-style proxy Activities must keep the sender's official
-        // intent_uri; a similarly resolvable URI embedded in the payload must
-        // not bypass that bridge.
+        // Sender proxy Activities must keep the official intent_uri; a
+        // similarly resolvable URI embedded in the payload must not bypass
+        // that bridge.
         assertSame(officialBridge, MyMIPushNotificationHelper.chooseClickRoute(
                 officialBridge, payloadDeepLink));
 
-        // Apps that omit notify_effect/intent_uri (such as Zhihu's feed push)
-        // still get the encrypted payload deep link.
+        // Apps that omit notify_effect/intent_uri still get the encrypted
+        // payload deep link.
         assertSame(payloadDeepLink, MyMIPushNotificationHelper.chooseClickRoute(
                 null, payloadDeepLink));
         assertSame(null, MyMIPushNotificationHelper.chooseClickRoute(null, null));

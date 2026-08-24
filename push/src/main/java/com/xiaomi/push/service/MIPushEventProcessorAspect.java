@@ -96,17 +96,21 @@ public class MIPushEventProcessorAspect {
             final ProceedingJoinPoint joinPoint,
             XMPushService pushService, String packageName,
             XmPushActionContainer container, PushMetaInfo metaInfo) throws Throwable {
+        XmPushActionContainer decorated =
+                MIPushEventProcessorAspect.decoratedContainer(packageName, container);
+        // The SDK's original check and our final decision must observe the same
+        // real-target configuration, including for wrapper containers.
+        AppInfoUtilsAspect.setLastMetaInfo(decorated.metaInfo);
         joinPoint.proceed();
-        if (container.action == ActionType.Registration) {
+        if (bypassesAppAliveCheck(container.action)) {
             return true;
         }
-        if (container.packageName.startsWith("com.mi.")
-                || container.packageName.startsWith("com.miui.")
-                || container.packageName.startsWith("com.xiaomi.")) {
-            return true;
-        }
-        XmPushActionContainer decorated = MIPushEventProcessorAspect.decoratedContainer(container.packageName, container);
         return AppInfoUtilsAspect.shouldSendBroadcast(pushService, packageName, decorated.metaInfo);
+    }
+
+    /** Registration is protocol control traffic; package names never bypass app-alive policy. */
+    static boolean bypassesAppAliveCheck(ActionType action) {
+        return action == ActionType.Registration;
     }
 
     public void processMIPushMessage(final JoinPoint joinPoint,

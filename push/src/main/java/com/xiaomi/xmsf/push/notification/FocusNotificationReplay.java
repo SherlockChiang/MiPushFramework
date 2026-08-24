@@ -66,8 +66,8 @@ public final class FocusNotificationReplay {
             JsonObject root = parsed.getAsJsonObject();
             // SystemUI uses the top-level sequence to reject expired focus
             // records. Some HyperOS templates duplicate it inside param_v2.
-            // Keep the JSON scalar type supplied by the sender: Taobao uses a
-            // string at the top level while its nested protocol uses a number.
+            // Keep the JSON scalar type supplied by the sender; clients may use
+            // a string at the top level and a number in the nested protocol.
             // A few SystemUI builds read these fields with a strict accessor.
             replaceSequence(root, timestampMillis);
             JsonElement paramV2 = root.get("param_v2");

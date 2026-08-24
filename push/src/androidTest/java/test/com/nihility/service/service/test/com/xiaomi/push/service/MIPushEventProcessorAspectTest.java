@@ -80,10 +80,10 @@ public class MIPushEventProcessorAspectTest {
     }
 
     @Test
-    public void awakeIfIsXiaomiApp() throws InvocationTargetException, NoSuchMethodException, IllegalAccessException {
-        assertTrue(shouldAwake(null, "com.mi.xxx"));
-        assertTrue(shouldAwake(null, "com.miui.xxx"));
-        assertTrue(shouldAwake(null, "com.xiaomi.xxx"));
+    public void packagePrefixesDoNotBypassAppAlivePolicy() throws InvocationTargetException, NoSuchMethodException, IllegalAccessException {
+        assertFalse(shouldAwake(null, "com.mi.mipushframework.missing"));
+        assertFalse(shouldAwake(null, "com.miui.mipushframework.missing"));
+        assertFalse(shouldAwake(null, "com.xiaomi.mipushframework.missing"));
     }
 
     @Test
@@ -109,6 +109,18 @@ public class MIPushEventProcessorAspectTest {
 
         setAllowAwakeByConfigurationFor(packageName);
         assertTrue(shouldAwake(metaInfo, packageName));
+    }
+
+    @Test
+    public void configurationUsesRealTargetInsteadOfWrapperPackage() throws InvocationTargetException, NoSuchMethodException, IllegalAccessException, JSONException {
+        String targetPackage = "com.example.target.missing";
+        String wrapperPackage = "com.example.wrapper.missing";
+        PushMetaInfo metaInfo = new PushMetaInfo();
+        metaInfo.extra = new HashMap<>();
+
+        setAllowAwakeByConfigurationFor(targetPackage);
+
+        assertTrue(shouldAwake(metaInfo, targetPackage, wrapperPackage));
     }
 
     @Test
@@ -157,7 +169,11 @@ public class MIPushEventProcessorAspectTest {
     }
 
     private boolean shouldAwake(PushMetaInfo metaInfo, String packageName) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException {
-        container.setPackageName(packageName);
+        return shouldAwake(metaInfo, packageName, packageName);
+    }
+
+    private boolean shouldAwake(PushMetaInfo metaInfo, String packageName, String containerPackageName) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException {
+        container.setPackageName(containerPackageName);
         container.metaInfo = metaInfo;
         return JavaCalls.callStaticMethodOrThrow(MIPushEventProcessor.class, "shouldSendBroadcast",
                 service, packageName, container, metaInfo);

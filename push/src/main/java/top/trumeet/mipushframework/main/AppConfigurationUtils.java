@@ -16,7 +16,6 @@ import com.nihility.notification.NotificationManagerEx;
 import com.xiaomi.xmsf.R;
 import com.xiaomi.xmsf.push.notification.NotificationChannelManager;
 
-import java.util.Arrays;
 import java.util.List;
 
 import top.trumeet.common.Constants;
@@ -34,26 +33,16 @@ public class AppConfigurationUtils {
     }
 
     boolean shouldSuggestFakeApp(String pkg) {
-        return !isBlacklistApp(pkg) && Utils.isUserApplication(pkg);
+        if (TextUtils.isEmpty(pkg)) {
+            return false;
+        }
+        return isFakeSuggestionEligible(
+                Utils.isUserApplication(pkg), TextUtils.equals(pkg, context.getPackageName()));
     }
 
-    boolean isBlacklistApp(String pkg) {
-        return isBlacklistContaines(pkg) || isBlacklistMatches(pkg);
-    }
-
-    boolean isBlacklistMatches(String pkg) {
-        String[] pkgsContains = context.getResources().getStringArray(R.array.fake_blacklist_contains);
-        for (String p : pkgsContains)
-            if (pkg.contains(p))
-                return true;
-        return false;
-    }
-
-    boolean isBlacklistContaines(String pkg) {
-        List<String> pkgsEqual = Arrays.asList(context.getResources().getStringArray(R.array.fake_blacklist_equals));
-        if (pkgsEqual.contains(pkg))
-            return true;
-        return false;
+    /** Package text never affects this policy: only install type and self identity do. */
+    static boolean isFakeSuggestionEligible(boolean userApplication, boolean ownApplication) {
+        return userApplication && !ownApplication;
     }
 
     void gotoRecentEventsPage() {

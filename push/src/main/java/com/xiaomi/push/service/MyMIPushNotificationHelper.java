@@ -1094,12 +1094,12 @@ public class MyMIPushNotificationHelper {
         // Some SDKs keep the actual deep link in the encrypted SendMessage
         // payload rather than in metaInfo.extra. Decode it with the stored
         // registration secret and inspect only documented route-like fields;
-        // this remains app-agnostic and lets clients without a click metadata
-        // route (for example Zhihu) work without package-specific adapters.
+        // this remains app-agnostic and lets clients without click metadata
+        // work without package-specific adapters.
         //
         // An explicit notify_effect/intent_uri is the sender's official bridge
-        // contract. Keep it authoritative: proxy Activities such as Tieba's
-        // XmNotifyActivity normally consume the complete MiPush click extras.
+        // contract. Keep it authoritative: sender proxy Activities normally
+        // consume the complete MiPush click extras.
         // A few clients publish a private proxy, however. XMSF cannot launch
         // that Activity under its own UID, so an exported route discovered in
         // the encrypted payload is safer and more useful than retaining an
@@ -1143,13 +1143,10 @@ public class MyMIPushNotificationHelper {
                 // closing), which makes a notification appear to do nothing.
                 // Freeze the component selected by PackageManager after the
                 // package ownership check so the user click has a deterministic
-                // destination. Keep the original action, data, flags and extras
-                // (QQ mqqwpa and Alipay alipays URIs both rely on them).
+                // destination. Keep the sender-defined action, data, flags and
+                // extras because URI routes may rely on all of them.
                 intent = makeResolvedActivityExplicit(pkgName, intent, resolvedActivity);
                 if (intent == null) {
-                    return null;
-                }
-                if (inFetchIntentBlackList(pkgName)) {
                     return null;
                 }
 
@@ -1176,8 +1173,8 @@ public class MyMIPushNotificationHelper {
     private static final int PAYLOAD_ROUTE_MAX_LENGTH = 16 * 1024;
     /**
      * Do not truncate JSON before parsing it. A truncated document is invalid
-     * and silently forces a launcher fallback (the Zhihu payloads are commonly
-     * just over 4 KiB). Reject truly unreasonable documents instead.
+     * and silently forces a launcher fallback. Reject truly unreasonable
+     * documents instead.
      */
     private static final int PAYLOAD_DOCUMENT_MAX_LENGTH = 64 * 1024;
 
@@ -1422,21 +1419,6 @@ public class MyMIPushNotificationHelper {
                 && resolveInfo.activityInfo != null
                 && targetPackage.equals(resolveInfo.activityInfo.packageName);
     }
-
-    /**
-     * tmp black list
-     *
-     * @param pkg package name
-     * @return is in black list
-     */
-    private static boolean inFetchIntentBlackList(String pkg) {
-        if (pkg.contains("youku")) {
-            return true;
-        }
-
-        return false;
-    }
-
 
     private static PendingIntent startServicePendingIntent(Context paramContext, XmPushActionContainer paramXmPushActionContainer, PushMetaInfo paramPushMetaInfo, byte[] paramArrayOfByte) {
         if (paramPushMetaInfo == null) {
