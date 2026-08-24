@@ -29,7 +29,18 @@ public class RegisteredApplicationDb {
     public static RegisteredApplication registerApplication(String pkg) {
         RegisteredApplication registeredApplication = getRegisteredApplication(pkg);
         if (registeredApplication == null) {
-            return create(pkg);
+            try {
+                return create(pkg);
+            } catch (RuntimeException insertFailure) {
+                // A registration event can race the application-list refresh. If the competing
+                // insert won the unique package constraint, reuse that row; otherwise preserve
+                // the original database failure.
+                registeredApplication = getRegisteredApplication(pkg);
+                if (registeredApplication != null) {
+                    return registeredApplication;
+                }
+                throw insertFailure;
+            }
         }
         return registeredApplication;
     }

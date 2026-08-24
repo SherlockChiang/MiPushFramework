@@ -3,6 +3,7 @@ package top.trumeet.mipushframework.main.subpage;
 import static top.trumeet.mipush.provider.db.RegisteredApplicationDb.registerApplication;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
@@ -21,13 +22,16 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import top.trumeet.common.utils.ElapsedTimer;
 import top.trumeet.common.utils.Utils;
 import top.trumeet.mipush.provider.db.EventDb;
+import top.trumeet.mipush.provider.db.RegistrationEvidenceResolver;
 import top.trumeet.mipush.provider.db.RegisteredApplicationDb;
 import top.trumeet.mipush.provider.entities.RegisteredApplication;
 import top.trumeet.mipushframework.utils.MiPushManifestChecker;
@@ -45,6 +49,10 @@ public class ApplicationPageOperation {
         final List<PackageInfo> packageInfos = getPackagesOnDevice();
         miPushApplications.totalPkg = packageInfos.size();
         logger.d("[loadApp] get package info ms: %d", timer.restart());
+
+        mergeActiveRegistrationPackages(
+                Utils.getApplication(), packageInfos, registeredPkgs);
+        logger.d("[loadApp] merge active registrations ms: %d", timer.restart());
 
         removePackagesThatNotSupportMiPushServices(packageInfos, registeredPkgs);
         logger.d("[loadApp] filter not service package ms: %d", timer.restart());
@@ -202,6 +210,79 @@ public class ApplicationPageOperation {
         return registeredPkgs;
     }
 
+    /**
+     * System-integrated and receiver-only clients may be present in the SDK's active registry
+     * without declaring the two standard client services. Include those installed packages by
+     * runtime capability, not by vendor or package-name lists.
+     */
+    static void mergeActiveRegistrationPackages(
+            Context context,
+            List<PackageInfo> packageInfos,
+            Map<String, RegisteredApplication> registeredPkgs) {
+        if (context == null || packageInfos == null || registeredPkgs == null) {
+            return;
+        }
+        Set<String> installedPackages = new HashSet<>();
+        for (PackageInfo packageInfo : packageInfos) {
+            if (packageInfo != null && packageInfo.applicationInfo != null
+                    && isApplicationInstalled(packageInfo)) {
+                installedPackages.add(packageInfo.packageName);
+            }
+        }
+        for (String packageName : getActiveRegistryPackages(context)) {
+            if (installedPackages.contains(packageName)
+                    && !registeredPkgs.containsKey(packageName)) {
+                registeredPkgs.put(packageName, registerApplication(packageName));
+            }
+        }
+    }
+
+    /** Reads the SDK registry once; absence is deliberately not treated as unregistration. */
+    static Set<String> getActiveRegistryPackages(Context context) {
+        Set<String> packages = new HashSet<>();
+        if (context == null) {
+            return packages;
+        }
+        SharedPreferences registry =
+                context.getSharedPreferences("pref_registered_pkg_names", Context.MODE_PRIVATE);
+        for (Map.Entry<String, ?> entry : registry.getAll().entrySet()) {
+            Object value = entry.getValue();
+            if (!TextUtils.isEmpty(entry.getKey())
+                    && value != null
+                    && !TextUtils.isEmpty(value.toString())) {
+                packages.add(entry.getKey());
+            }
+        }
+        return packages;
+    }
+
+    /** Snapshot actual delivery times once so list refresh never scans notification history. */
+    static Map<String, Long> getLastReceiveTimes(Context context) {
+        Map<String, Long> receiveTimes = new HashMap<>();
+        if (context == null) {
+            return receiveTimes;
+        }
+        SharedPreferences preferences =
+                context.getSharedPreferences("last_receive_time", Context.MODE_PRIVATE);
+        for (Map.Entry<String, ?> entry : preferences.getAll().entrySet()) {
+            if (entry.getValue() instanceof Long) {
+                receiveTimes.put(entry.getKey(), (Long) entry.getValue());
+            }
+        }
+        return receiveTimes;
+    }
+
+    /** Read the persisted SDK state directly; the vendored runtime's cold-start cache is lossy. */
+    static Set<String> getExplicitlyUnregisteredPackages(Context context) {
+        if (context == null) {
+            return new HashSet<>();
+        }
+        String persisted = context.getSharedPreferences(
+                "mipush_app_info", Context.MODE_PRIVATE)
+                .getString("unregistered_pkg_names", "");
+        return RegistrationEvidenceResolver.parsePersistedPackageSet(persisted);
+    }
+
     static void removeApplicationsThatQueryNotMatched(MiPushApplications miPushApplications, String query) {
         for (final Iterator<RegisteredApplication> iterator = miPushApplications.res.iterator(); iterator.hasNext(); ) {
             RegisteredApplication info = iterator.next();
@@ -270,19 +351,28 @@ public class ApplicationPageOperation {
         ElapsedTimer totalTimer = new ElapsedTimer();
         ElapsedTimer timer = new ElapsedTimer();
         EventDb.RegistrationInfo registrationInfo = EventDb.queryRegistered();
+        Set<String> activeRegistryPackages = getActiveRegistryPackages(context);
+        Set<String> explicitlyUnregisteredPackages =
+                getExplicitlyUnregisteredPackages(context);
+        Map<String, Long> lastReceiveTimes = getLastReceiveTimes(context);
         logger.d("[updateApp] get registeredPkgsFromEvents ms: %d", timer.restart());
 
         for (RegisteredApplication application : list) {
             String pkg = application.getPackageName();
             application.appName = Global.ApplicationNameCache()
                     .getAppName(context, pkg).toString();
-            if (registrationInfo.registered.contains(pkg)) {
-                application.setRegisteredType(RegisteredApplication.RegisteredType.Registered);
-            } else if (registrationInfo.unregistered.contains(pkg)) {
-                application.setRegisteredType(RegisteredApplication.RegisteredType.Unregistered);
-            } else {
-                application.setRegisteredType(RegisteredApplication.RegisteredType.NotRegistered);
-            }
+            long lastReceiveTime = lastReceiveTimes.containsKey(pkg)
+                    ? lastReceiveTimes.get(pkg) : 0L;
+            boolean newerReceiveEvidence = RegistrationEvidenceResolver
+                    .isReceiveEvidenceNewer(
+                            lastReceiveTime,
+                            registrationInfo.latestControlEvidenceTime.get(pkg));
+            application.setRegisteredType(RegistrationEvidenceResolver.resolve(
+                    explicitlyUnregisteredPackages.contains(pkg),
+                    activeRegistryPackages.contains(pkg),
+                    registrationInfo.registered.contains(pkg),
+                    newerReceiveEvidence,
+                    !newerReceiveEvidence && registrationInfo.unregistered.contains(pkg)));
             RegisteredApplicationDb.update(application);
         }
         logger.d("[updateApp] update app ms: %d", timer.restart());

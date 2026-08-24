@@ -325,7 +325,7 @@ This could be the application doing a reverse registration, or the registration 
     <string name="application_filter_unregistered">Has problems</string>
     <string name="application_filter_not_registered">Not registered</string>
     <string name="last_receive">last receive: </string>
-    <string name="mipush_services_not_found">Services Not Found</string>
+    <string name="mipush_services_not_found">Standard MiPush SDK services not detected</string>
     <string name="mipush_services_unknown">Unable to verify push service status</string>
     <string name="try_to_force_register_all_applications">Try to force register all applications</string>
 

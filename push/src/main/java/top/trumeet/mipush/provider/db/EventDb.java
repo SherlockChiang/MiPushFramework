@@ -11,14 +11,15 @@ import androidx.annotation.Nullable;
 import com.nihility.XMPushUtils;
 import com.xiaomi.xmpush.thrift.XmPushActionContainer;
 import com.xiaomi.xmpush.thrift.XmPushActionRegistrationResult;
-import com.xiaomi.xmsf.push.utils.RegSecUtils;
 import com.xiaomi.xmsf.utils.ConvertUtils;
 
+import org.greenrobot.greendao.query.LazyList;
 import org.greenrobot.greendao.query.QueryBuilder;
-import org.greenrobot.greendao.query.WhereCondition;
 
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import top.trumeet.common.utils.DatabaseUtils;
@@ -44,6 +45,7 @@ public class EventDb {
     public static class RegistrationInfo {
         public Set<String> registered = new HashSet<>();
         public Set<String> unregistered = new HashSet<>();
+        public Map<String, Long> latestControlEvidenceTime = new HashMap<>();
     }
 
     public static long insertEvent(Event event) {
@@ -129,27 +131,53 @@ public class EventDb {
 
     public static RegistrationInfo queryRegistered() {
         QueryBuilder<Event> query = daoSession.queryBuilder(Event.class)
-                .where(EventDao.Properties.Type.in(Event.Type.RegistrationResult, Event.Type.UnRegistration))
-                .where(new WhereCondition.StringCondition("1" +
-                        " GROUP BY " + EventDao.Properties.Pkg.columnName +
-                        " HAVING MAX(" + EventDao.Properties.Date.columnName + ")"));
-        List<Event> events = query.list();
+                .where(EventDao.Properties.Type.in(
+                        Event.Type.RegistrationResult,
+                        Event.Type.UnRegistration))
+                .orderDesc(EventDao.Properties.Date, EventDao.Properties.Id);
 
         RegistrationInfo info = new RegistrationInfo();
-        for (Event event : events) {
-            XmPushActionContainer container = XMPushUtils.packToContainer(event.getPayload());
-            XmPushActionRegistrationResult data = null;
-            try {
-                data = (XmPushActionRegistrationResult)
-                        ConvertUtils.getResponseMessageBodyFromContainer(container,
-                                RegSecUtils.getRegSec(container));
-            } catch (Exception ignored) {
+        Set<String> packagesWithNewerEvidence = new HashSet<>();
+        LazyList<Event> events = query.listLazyUncached();
+        try {
+            for (Event event : events) {
+                String packageName = event.getPkg();
+                if (packageName == null || packageName.isEmpty()
+                        || packagesWithNewerEvidence.contains(packageName)) {
+                    continue;
+                }
+
+                XmPushActionRegistrationResult registrationResult = null;
+                if (event.getType() == Event.Type.RegistrationResult) {
+                    try {
+                        XmPushActionContainer container =
+                                XMPushUtils.packToContainer(event.getPayload());
+                        registrationResult = (XmPushActionRegistrationResult)
+                                ConvertUtils.getResponseMessageBodyFromContainer(
+                                        container, event.getRegSec());
+                    } catch (Throwable ignored) {
+                        // An undecodable response supplies no evidence and is never treated as
+                        // a successful registration.
+                    }
+                }
+
+                RegistrationEvidenceResolver.EventEvidence evidence =
+                        RegistrationEvidenceResolver.classifyEvent(
+                                event.getType(), registrationResult);
+                if (evidence == RegistrationEvidenceResolver.EventEvidence.UNKNOWN) {
+                    // UNKNOWN is not evidence and must not hide an older, decodable control event.
+                    continue;
+                }
+                packagesWithNewerEvidence.add(packageName);
+                info.latestControlEvidenceTime.put(packageName, event.getDate());
+                if (evidence == RegistrationEvidenceResolver.EventEvidence.POSITIVE) {
+                    info.registered.add(packageName);
+                } else {
+                    info.unregistered.add(packageName);
+                }
             }
-            if (event.getType() == Event.Type.RegistrationResult && (data == null || data.errorCode == 0)) {
-                info.registered.add(event.getPkg());
-            } else {
-                info.unregistered.add(event.getPkg());
-            }
+        } finally {
+            events.close();
         }
         return info;
     }
