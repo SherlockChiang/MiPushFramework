@@ -11,6 +11,7 @@ import android.util.Log;
 import androidx.annotation.Nullable;
 
 import com.xiaomi.push.sdk.MyPushMessageHandler;
+import com.xiaomi.push.sdk.TargetSdkClickDispatcher;
 import com.xiaomi.push.service.PushConstants;
 import com.xiaomi.xmpush.thrift.XmPushActionContainer;
 
@@ -34,6 +35,8 @@ public final class NotificationClickActivity extends Activity {
             "com.xiaomi.xmsf.extra.NOTIFICATION_SERVICE_INTENT";
     public static final String EXTRA_TARGET_ACTIVITY_PRIVATE =
             "com.xiaomi.xmsf.extra.NOTIFICATION_TARGET_ACTIVITY_PRIVATE";
+    public static final String EXTRA_MANUAL_REPLAY =
+            "com.xiaomi.xmsf.extra.NOTIFICATION_MANUAL_REPLAY";
 
     private static final String TAG = "MiPushClick";
 
@@ -68,9 +71,17 @@ public final class NotificationClickActivity extends Activity {
         Intent targetIntent = getParcelable(clickIntent, EXTRA_TARGET_INTENT);
         boolean targetActivityPrivate = clickIntent.getBooleanExtra(
                 EXTRA_TARGET_ACTIVITY_PRIVATE, false);
+        boolean manualReplay = clickIntent.getBooleanExtra(EXTRA_MANUAL_REPLAY, false);
 
         try {
-            if (container != null && payload != null) {
+            if (manualReplay) {
+                TargetSdkClickDispatcher.DispatchResult result =
+                        TargetSdkClickDispatcher.dispatchReplay(this, container);
+                if (TargetSdkClickDispatcher.shouldLaunchReplayFallback(result)) {
+                    Log.w(TAG, "manual replay SDK hand-off failed: " + result);
+                    startTargetLauncher(container);
+                }
+            } else if (container != null && payload != null) {
                 // This is the official generic click contract, now executed from
                 // a user-initiated Activity instead of a background Service. Send
                 // the complete payload through the target SDK first, then open the
@@ -97,9 +108,13 @@ public final class NotificationClickActivity extends Activity {
         } catch (Throwable error) {
             Log.w(TAG, "notification click hand-off failed", error);
             try {
-                // If a target does not expose the MiPush service, the explicit route
-                // or launcher remains a safe user-visible fallback.
-                startTargetActivity(targetIntent, clickIntent, container, targetActivityPrivate);
+                if (manualReplay) {
+                    startTargetLauncher(container);
+                } else {
+                    // Live notifications retain their existing validated route.
+                    startTargetActivity(
+                            targetIntent, clickIntent, container, targetActivityPrivate);
+                }
             } catch (Throwable fallbackError) {
                 Log.w(TAG, "notification click Activity fallback failed", fallbackError);
             }
@@ -115,6 +130,29 @@ public final class NotificationClickActivity extends Activity {
             }
             finish();
         }
+    }
+
+    /** Replay payloads may contain stale vendor bridge tokens; failure opens only the app root. */
+    private void startTargetLauncher(@Nullable XmPushActionContainer container) {
+        String targetPackage = container == null ? null : container.getPackageName();
+        if (targetPackage == null) {
+            return;
+        }
+        Intent launch = getPackageManager().getLaunchIntentForPackage(targetPackage);
+        if (launch == null) {
+            return;
+        }
+        ResolveInfo resolved = getPackageManager().resolveActivity(
+                launch, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY);
+        if (resolved == null || resolved.activityInfo == null
+                || !resolved.activityInfo.exported
+                || !targetPackage.equals(resolved.activityInfo.packageName)) {
+            return;
+        }
+        launch.setComponent(new ComponentName(
+                resolved.activityInfo.packageName, resolved.activityInfo.name));
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(launch);
     }
 
     private void startTargetActivity(

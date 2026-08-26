@@ -50,7 +50,7 @@ public class MockMIPushMessage {
     }
 
     static XmPushActionContainer prepareForReplay(XmPushActionContainer container) {
-        XmPushActionContainer replay = container.deepCopy();
+        XmPushActionContainer replay = NotificationReplayMarker.markedCopy(container);
         PushMetaInfo metaInfo = replay.getMetaInfo();
         if (metaInfo == null) {
             return replay;

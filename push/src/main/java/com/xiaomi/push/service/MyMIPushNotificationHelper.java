@@ -43,6 +43,7 @@ import com.elvishew.xlog.XLog;
 import com.nihility.Global;
 import com.nihility.XMPushUtils;
 import com.nihility.notification.NotificationManagerEx;
+import com.nihility.utils.NotificationReplayMarker;
 import com.xiaomi.channel.commonutils.android.AppInfoUtils;
 import com.xiaomi.channel.commonutils.reflect.JavaCalls;
 import com.xiaomi.mipush.sdk.PushMessageProcessor;
@@ -799,14 +800,21 @@ public class MyMIPushNotificationHelper {
         if (activityIntent == null) {
             activityIntent = getLaunchIntent(context, container.getPackageName());
         }
+        boolean replaySenderRoute = shouldUseReplayClickTrampoline(
+                NotificationReplayMarker.isMarked(container),
+                clickRoute != null,
+                clickRoute != null && clickRoute.discoveredRoute);
         // Keep the setting tri-state: an absent key selects the direct Activity
         // path, while an explicitly supplied false can still request the
-        // historical service PendingIntent for compatibility.
+        // historical service PendingIntent for live-notification compatibility.
+        // Historical replays with an official sender route always use the
+        // SDK-first Activity hand-off because stale vendor bridge tokens must
+        // never re-enter the legacy Service click path.
         Boolean explicitSetting = configuration.keys().contains("use_clicked_activity")
                 ? configuration.useClickedActivity(false)
                 : null;
         boolean useActivity = shouldUseActivityClick(
-                explicitSetting, messagingStyle, activityIntent);
+                explicitSetting, messagingStyle, activityIntent, replaySenderRoute);
         if (!useActivity) {
             return PendingIntent.getService(context, notificationId, intent,
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
@@ -820,9 +828,11 @@ public class MyMIPushNotificationHelper {
         // from inside the target UID. Exported routes continue to use the
         // direct Activity PendingIntent so HyperOS can provide its normal
         // conversation/floating-window affordances.
-        if (!isActivityExported(context, activityIntent)) {
+        boolean targetActivityExported = isActivityExported(context, activityIntent);
+        if (replaySenderRoute || !targetActivityExported) {
             Intent clickTrampoline = new Intent(context,
                     com.xiaomi.xmsf.NotificationClickActivity.class);
+            clickTrampoline.putExtras(extra);
             clickTrampoline.putExtra(
                     com.xiaomi.xmsf.NotificationClickActivity.EXTRA_TARGET_INTENT,
                     activityIntent);
@@ -831,8 +841,10 @@ public class MyMIPushNotificationHelper {
                     intent);
             clickTrampoline.putExtra(
                     com.xiaomi.xmsf.NotificationClickActivity.EXTRA_TARGET_ACTIVITY_PRIVATE,
-                    true);
-            clickTrampoline.putExtras(extra);
+                    !targetActivityExported);
+            clickTrampoline.putExtra(
+                    com.xiaomi.xmsf.NotificationClickActivity.EXTRA_MANUAL_REPLAY,
+                    replaySenderRoute);
             extra.putBoolean(EXTRA_ACTIVITY_CLICK_PENDING_INTENT, true);
             return PendingIntent.getActivity(context, notificationId, clickTrampoline,
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
@@ -861,6 +873,12 @@ public class MyMIPushNotificationHelper {
      */
     static boolean shouldAttachMiPushBridgeExtras(boolean discoveredRoute) {
         return !discoveredRoute;
+    }
+
+    /** Only manual replays of an actual sender route use the SDK-first hand-off. */
+    static boolean shouldUseReplayClickTrampoline(
+            boolean replay, boolean routePresent, boolean discoveredRoute) {
+        return replay && routePresent && !discoveredRoute;
     }
 
     /**
@@ -958,12 +976,18 @@ public class MyMIPushNotificationHelper {
      */
     static boolean shouldUseActivityClick(
             @Nullable Boolean explicitSetting, boolean messagingStyle,
-            @Nullable Intent activityIntent) {
+            @Nullable Intent activityIntent, boolean replaySenderRoute) {
         // A missing/invalid target can never be upgraded to an Activity
         // PendingIntent. The caller supplies only intents validated against the
         // target package, while this guard keeps the fallback safe for all paths.
         if (activityIntent == null) {
             return false;
+        }
+        // A manual replay has no valid live vendor-click token to fall back to.
+        // Keep it in the user-initiated SDK hand-off even when an old per-app
+        // compatibility setting requested the legacy Service PendingIntent.
+        if (replaySenderRoute) {
+            return true;
         }
         // Explicit configuration always wins over the MessagingStyle default,
         // including an explicit false. An absent setting now uses the direct

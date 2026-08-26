@@ -101,24 +101,29 @@ public class NotificationExecutorTest {
 
         // Explicit values take precedence over the style-derived default.
         assertTrue(MyMIPushNotificationHelper.shouldUseActivityClick(
-                Boolean.TRUE, false, activity));
+                Boolean.TRUE, false, activity, false));
         assertTrue(!MyMIPushNotificationHelper.shouldUseActivityClick(
-                Boolean.FALSE, true, activity));
+                Boolean.FALSE, true, activity, false));
+
+        // A historical replay with a sender route must never fall back to the
+        // stale Service click path, even under an old compatibility opt-out.
+        assertTrue(MyMIPushNotificationHelper.shouldUseActivityClick(
+                Boolean.FALSE, false, activity, true));
 
         // An absent setting uses the direct Activity path for both ordinary and
         // MessagingStyle notifications. This avoids Android 16's background
         // service-to-Activity launch restriction after a notification click.
         assertTrue(MyMIPushNotificationHelper.shouldUseActivityClick(
-                null, true, activity));
+                null, true, activity, false));
         assertTrue(MyMIPushNotificationHelper.shouldUseActivityClick(
-                null, false, activity));
+                null, false, activity, false));
 
         // No resolved target Activity must always use the safe service path,
         // even when the setting or style asks for an Activity.
         assertTrue(!MyMIPushNotificationHelper.shouldUseActivityClick(
-                Boolean.TRUE, true, null));
+                Boolean.TRUE, true, null, false));
         assertTrue(!MyMIPushNotificationHelper.shouldUseActivityClick(
-                null, true, null));
+                null, true, null, true));
     }
 
     @Test
@@ -157,6 +162,18 @@ public class NotificationExecutorTest {
     public void discoveredDeepLinksDoNotReceiveMiPushBridgeExtras() {
         assertTrue(MyMIPushNotificationHelper.shouldAttachMiPushBridgeExtras(false));
         assertTrue(!MyMIPushNotificationHelper.shouldAttachMiPushBridgeExtras(true));
+    }
+
+    @Test
+    public void onlyReplaySenderRouteUsesSdkFirstTrampoline() {
+        assertTrue(MyMIPushNotificationHelper.shouldUseReplayClickTrampoline(
+                true, true, false));
+        assertTrue(!MyMIPushNotificationHelper.shouldUseReplayClickTrampoline(
+                false, true, false));
+        assertTrue(!MyMIPushNotificationHelper.shouldUseReplayClickTrampoline(
+                true, false, false));
+        assertTrue(!MyMIPushNotificationHelper.shouldUseReplayClickTrampoline(
+                true, true, true));
     }
 
     @Test

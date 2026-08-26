@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
@@ -308,10 +309,15 @@ private fun EventItem(item: EventInfoForDisplay, onClick: (EventInfoForDisplay) 
             AppIcon(item.packageName, item.appName, modifier = Modifier.size(48.dp))
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
-                Row {
-                    ConfigOptions(item)
-                    ChannelInfo(item)
-                    Spacer(Modifier.weight(1f))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    EventHeader(
+                        item = item,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
                     EventReceiveDate(item)
                 }
                 EventTitle(item)
@@ -322,23 +328,32 @@ private fun EventItem(item: EventInfoForDisplay, onClick: (EventInfoForDisplay) 
 }
 
 @Composable
-private fun ConfigOptions(item: EventInfoForDisplay) {
-    if (item.configOptions.isNotEmpty()) {
-        Text(item.configOptions.toString(), style = MiuixTheme.textStyles.footnote1)
-        Spacer(Modifier.width(5.dp))
-    }
+private fun EventHeader(item: EventInfoForDisplay, modifier: Modifier = Modifier) {
+    Text(
+        text = eventHeaderText(item.configOptions, item.channel),
+        modifier = modifier,
+        style = MiuixTheme.textStyles.footnote1,
+        maxLines = 1,
+        softWrap = false,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
-@Composable
-private fun ChannelInfo(item: EventInfoForDisplay) {
-    Text(item.channel, style = MiuixTheme.textStyles.footnote1)
+internal fun eventHeaderText(configOptions: Set<String>, channel: String): String = when {
+    configOptions.isEmpty() -> channel
+    channel.isEmpty() -> configOptions.toString()
+    else -> "$configOptions $channel"
 }
-
 
 @Composable
 private fun EventReceiveDate(item: EventInfoForDisplay) {
     val format = receiveDateFormat
-    Text(format.format(item.receiveDate), style = MiuixTheme.textStyles.footnote1)
+    Text(
+        text = format.format(item.receiveDate),
+        style = MiuixTheme.textStyles.footnote1,
+        maxLines = 1,
+        softWrap = false,
+    )
 }
 
 @Composable
@@ -426,6 +441,34 @@ fun EventListPreview() {
 
     Page {
         EventList({ }, getEvents, "", "")
+    }
+}
+
+@Preview(
+    name = "Long event header",
+    showBackground = true,
+    widthDp = 320,
+    heightDp = 220,
+    fontScale = 1.3f,
+)
+@Composable
+private fun EventItemLongHeaderPreview() {
+    Page {
+        EventItem(
+            item = EventInfoForDisplay(
+                id = 1,
+                packageName = "preview.application",
+                configOptions = linkedSetOf(
+                    "configuration-option-without-break-opportunities",
+                    "secondary-option",
+                ),
+                channel = "这是一个用于验证窄屏省略行为的超长通知频道标题",
+                receiveDate = date(2026, 8, 25),
+                title = "通知标题仍在独立行显示",
+                content = "右侧完整时间应保持单行，左侧头部使用省略号。",
+            ),
+            onClick = {},
+        )
     }
 }
 
