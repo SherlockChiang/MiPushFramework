@@ -1,6 +1,8 @@
 package test.top.trumeet.common.utils.utils;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
@@ -27,5 +29,14 @@ public class DeviceFocusPolicyTest {
                 DeviceFocusPolicy.rendererFor("com.google.android.systemui", "Xiaomi", 3));
         assertEquals(DeviceFocusPolicy.Renderer.PORTABLE,
                 DeviceFocusPolicy.rendererFor(null, null, 3));
+    }
+
+    @Test
+    public void packageAttributionRequiresXiaomiHardwareIdentity() {
+        assertTrue(DeviceFocusPolicy.isXiaomiManufacturer("Xiaomi"));
+        assertTrue(DeviceFocusPolicy.isXiaomiManufacturer("POCO"));
+        assertFalse(DeviceFocusPolicy.isXiaomiManufacturer("Sony"));
+        assertFalse(DeviceFocusPolicy.isXiaomiManufacturer("Google"));
+        assertFalse(DeviceFocusPolicy.isXiaomiManufacturer(null));
     }
 }

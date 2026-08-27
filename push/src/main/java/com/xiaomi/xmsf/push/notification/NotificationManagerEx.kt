@@ -10,6 +10,7 @@ import android.os.UserHandle
 import android.service.notification.StatusBarNotification
 import androidx.annotation.RequiresApi
 import com.elvishew.xlog.XLog
+import top.trumeet.common.utils.DeviceFocusPolicy
 
 object NotificationManagerEx {
     private const val TAG = "NotificationManagerEx"
@@ -61,6 +62,12 @@ object NotificationManagerEx {
     private fun supportsPackageAttribution(): Boolean {
         packageAttributionSupported?.let { return it }
         if (!::notificationManager.isInitialized) return false
+        // A stale/compatibility Xposed hook must not turn on Xiaomi's hidden
+        // package-attributed API on Sony, AOSP, or another non-Xiaomi ROM.
+        if (!DeviceFocusPolicy.isXiaomiManufacturer(Build.MANUFACTURER)) {
+            packageAttributionSupported = false
+            return false
+        }
         val supported = (invokeHidden(
             "isSystemConditionProviderEnabled",
             arrayOf(String::class.java),
@@ -212,6 +219,12 @@ object NotificationManagerEx {
      * available.
      */
     private fun cancelAsPackage(packageName: String, tag: String?, id: Int): Boolean {
+        if (!supportsPackageAttribution() ||
+            !::notificationContext.isInitialized ||
+            packageName == notificationContext.packageName
+        ) {
+            return false
+        }
         return invokeHidden(
             "cancelAsPackage",
             arrayOf(String::class.java, String::class.java, Int::class.javaPrimitiveType!!),
@@ -343,6 +356,12 @@ object NotificationManagerEx {
     }
 
     private fun invokeService(methodName: String, args: Array<Any?>): HiddenCallResult {
+        // Channel, permission and active-notification queries must use the
+        // same ownership model as notify(). Mixing target-owned channels with
+        // an XMSF-owned public notification makes Android reject the record.
+        if (!supportsPackageAttribution()) {
+            return HiddenCallResult(false, null)
+        }
         return invokeHidden(notificationService, methodName, args)
     }
 
