@@ -24,13 +24,13 @@ jobs:
 
     - name: Write key
       run: |
-        if [ ! -z "${{ secrets.SIGNING_KEY }}" ]; then
+        if [ ! -z "${{ secrets.MIPUSH_SIGNING_KEY }}" ]; then
           echo HAS_SIGNING_KEY=true >> $GITHUB_ENV
-          echo KEYSTORE_PASSWORD='${{ secrets.KEYSTORE_PASSWORD }}' >> local.properties
-          echo KEYSTORE_ALIAS='${{ secrets.KEYSTORE_ALIAS }}' >> local.properties
-          echo KEY_PASSWORD='${{ secrets.KEY_PASSWORD }}' >> local.properties
+          echo KEYSTORE_PASSWORD='${{ secrets.MIPUSH_KEYSTORE_PASSWORD }}' >> local.properties
+          echo KEYSTORE_ALIAS='${{ secrets.MIPUSH_KEY_ALIAS }}' >> local.properties
+          echo KEY_PASSWORD='${{ secrets.MIPUSH_KEY_PASSWORD }}' >> local.properties
           echo KEY_LOCATE='../release.keystore' >> local.properties
-          echo ${{ secrets.SIGNING_KEY }} | base64 --decode > release.keystore
+          echo ${{ secrets.MIPUSH_SIGNING_KEY }} | base64 --decode > release.keystore
         else
           echo HAS_SIGNING_KEY=false >> $GITHUB_ENV
         fi

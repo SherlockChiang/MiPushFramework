@@ -7,6 +7,9 @@
 /captures
 .externalNativeBuild
 .yuuta.jks
+*.jks
+*.keystore
+.mipush-project-signing.env
 gradle.properties
 gen/
 debug/

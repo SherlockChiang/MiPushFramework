@@ -39,16 +39,22 @@ android {
             enableV3Signing = true
             enableV4Signing = true
         }
+        // The legacy config name is kept for variant compatibility. The key is
+        // project-owned and can be supplied through CI or local properties.
         nihility {
             v1SigningEnabled true
             v2SigningEnabled true
             enableV3Signing = true
             enableV4Signing = true
 
-            def locale = project.rootProject.file(".yuuta.jks")
-            def keystorePwd = System.getenv("KEYSTORE_PASS")
-            def alias = System.getenv("ALIAS_NAME")
-            def pwd = System.getenv("ALIAS_PASS")
+            def locale = System.getenv("MIPUSH_KEYSTORE_PATH")
+            def keystorePwd = System.getenv("MIPUSH_KEYSTORE_PASSWORD") ?: System.getenv("KEYSTORE_PASS")
+            def alias = System.getenv("MIPUSH_KEY_ALIAS") ?: System.getenv("ALIAS_NAME")
+            def pwd = System.getenv("MIPUSH_KEY_PASSWORD") ?: System.getenv("ALIAS_PASS")
+            if (locale == null) {
+                // Preserve the old local fallback for existing developer setups.
+                locale = project.rootProject.file(".yuuta.jks")
+            }
             if (project.rootProject.file('local.properties').exists()) {
                 Properties properties = new Properties()
                 properties.load(project.rootProject.file('local.properties').newDataInputStream())
@@ -169,15 +175,15 @@ android.applicationVariants.all { variant ->
 }
 
 gradle.taskGraph.whenReady { taskGraph ->
-    boolean requiresNihilityKey = taskGraph.allTasks.any { task ->
+    boolean requiresProjectKey = taskGraph.allTasks.any { task ->
         String name = task.name.toLowerCase()
         (name.contains("normalrelease") || name.contains("vc105release")) &&
                 (name.startsWith("assemble") || name.startsWith("package") || name.startsWith("sign"))
     }
-    if (requiresNihilityKey) {
-        def nihilityStore = android.signingConfigs.nihility.storeFile
-        if (nihilityStore == null || !nihilityStore.exists()) {
-            throw new GradleException("Official Nihility signing key (.yuuta.jks / KEY_LOCATE) is missing. Release build cannot proceed.")
+    if (requiresProjectKey) {
+        def projectStore = android.signingConfigs.nihility.storeFile
+        if (projectStore == null || !projectStore.exists()) {
+            throw new GradleException("Project signing key (MIPUSH_KEYSTORE_PATH / KEY_LOCATE) is missing. Release build cannot proceed.")
         }
     }
 }
