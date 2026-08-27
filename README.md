@@ -120,6 +120,20 @@
 * 锤子 ROM 下，Push 可以正确收到通知，但是通知栏没有提示 #143
 * 一些通知 Feature 可能无法使用（如通知都会显示为推送框架发出，而不是目标应用）
 
+## 界面参考与第三方归因
+
+悬浮底部导航栏的交互和几何布局参考了 KernelSU Manager 的公开实现，具体包括
+`FloatingBottomBar.kt` 与 `BottomBarMiuix.kt`：
+
+* [`FloatingBottomBar.kt`](https://github.com/tiann/KernelSU/blob/main/manager/app/src/main/java/me/weishu/kernelsu/ui/component/FloatingBottomBar.kt)
+* [`BottomBarMiuix.kt`](https://github.com/tiann/KernelSU/blob/main/manager/app/src/main/java/me/weishu/kernelsu/ui/component/bottombar/BottomBarMiuix.kt)
+* [KernelSU LICENSE](https://github.com/tiann/KernelSU/blob/main/LICENSE)（GPL-3.0）
+
+本项目使用 Miuix 0.2.x API 对该交互进行了独立重写，没有复制 KernelSU 的源代码、资源或
+模糊/液态玻璃依赖；因此这里记录的是设计与行为参考，而不是把 KernelSU 代码作为本项目代码
+直接分发。KernelSU 的 `FloatingBottomBar.kt` 文件头另行注明其参考了 Apache-2.0 的
+compose-miuix-ui 示例，本项目没有直接引入该示例。
+
 ## 感谢
 
 * @Rachel030219 提供文件

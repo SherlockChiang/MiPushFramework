@@ -246,8 +246,11 @@ fun MiuixBottomNavigation(
         val indicatorScaleX = 1f + 0.10f * pressProgress
         val indicatorScaleY = 1f - 0.04f * pressProgress
 
-        // Miuix 0.2.x predates FloatingNavigationBar and the blur module used by current
-        // KernelSU. This compatibility path preserves its 64/4/56/76dp geometry, draggable
+        // Interaction and geometry reference: KernelSU Manager's FloatingBottomBar and
+        // BottomBarMiuix (GPL-3.0), independently reimplemented here with the Miuix 0.2.x API:
+        // https://github.com/tiann/KernelSU/tree/main/manager/app/src/main/java/me/weishu/kernelsu/ui/component
+        // This file does not copy KernelSU source, assets, or its blur dependencies.
+        // The compatibility path preserves the reference's 64/4/56/76dp geometry, draggable
         // indicator, RTL-aware motion and edge resistance without importing the newer blur stack.
         Surface(
             modifier = modifier
