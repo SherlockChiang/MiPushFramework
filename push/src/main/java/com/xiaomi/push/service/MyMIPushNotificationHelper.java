@@ -87,8 +87,6 @@ import top.trumeet.mipush.provider.entities.RegisteredApplication;
  */
 
 public class MyMIPushNotificationHelper {
-    private static final String EXTRA_ACTIVITY_CLICK_PENDING_INTENT =
-            "com.xiaomi.xmsf.extra.NOTIFICATION_ACTIVITY_CLICK_PENDING_INTENT";
 
     public static final String CLASS_NAME_PUSH_MESSAGE_HANDLER = "com.xiaomi.mipush.sdk.PushMessageHandler";
     private static Logger logger = XLog.tag("MyNotificationHelper").build();
@@ -388,17 +386,17 @@ public class MyMIPushNotificationHelper {
         intentExtra.putExtra(Constants.INTENT_NOTIFICATION_ID, notificationId);
         intentExtra.putExtra(Constants.INTENT_NOTIFICATION_GROUP, notificationBuilder.build().getGroup());
 
-        PendingIntent localPendingIntent = getClickedPendingIntent(
+        ClickPendingIntent clickPendingIntent = getClickedPendingIntent(
                 context, container, decryptedContent, notificationId, intentExtra.getExtras(),
                 useMessagingStyle);
 
-        if (localPendingIntent != null) {
-            notificationBuilder.setContentIntent(localPendingIntent);
+        if (clickPendingIntent != null) {
+            notificationBuilder.setContentIntent(clickPendingIntent.pendingIntent);
             // The temporary-whitelist service PendingIntent is only needed for
             // the legacy Service click path. Carrying it alongside an Activity
             // click can make HyperOS wake the target service and the target
             // Activity together, producing a visible hand-off pause.
-            if (!intentExtra.getBooleanExtra(EXTRA_ACTIVITY_CLICK_PENDING_INTENT, false)) {
+            if (shouldCarryTemporaryWhitelist(clickPendingIntent.activity)) {
                 carryPendingIntentForTemporarilyWhitelisted(context, container, notificationBuilder);
             }
         }
@@ -747,7 +745,7 @@ public class MyMIPushNotificationHelper {
         return null;
     }
 
-    private static PendingIntent getClickedPendingIntent(
+    private static ClickPendingIntent getClickedPendingIntent(
             Context context, XmPushActionContainer container, byte[] decryptedContent,
             int notificationId, Bundle extra, boolean messagingStyle) {
         PushMetaInfo metaInfo = container.getMetaInfo();
@@ -773,9 +771,9 @@ public class MyMIPushNotificationHelper {
             Intent intent = new Intent("android.intent.action.VIEW");
             intent.setData(Uri.parse(urlJump));
             intent.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
-            extra.putBoolean(EXTRA_ACTIVITY_CLICK_PENDING_INTENT, true);
-            return PendingIntent.getActivity(context, notificationId, intent,
-                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            return ClickPendingIntent.activity(PendingIntent.getActivity(
+                    context, notificationId, intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
         }
 
         Intent intent = new Intent();
@@ -816,20 +814,21 @@ public class MyMIPushNotificationHelper {
         boolean useActivity = shouldUseActivityClick(
                 explicitSetting, messagingStyle, activityIntent, replaySenderRoute);
         if (!useActivity) {
-            return PendingIntent.getService(context, notificationId, intent,
-                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            return ClickPendingIntent.service(PendingIntent.getService(
+                    context, notificationId, intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
         }
 
         // A sender may publish a private proxy Activity (the common pattern for
         // MiPush bridge implementations). XMSF cannot start a non-exported
         // Activity because Android enforces the target UID at PendingIntent
-        // send time. Route those clicks through the target app's exported
-        // PushMessageHandler instead; the SDK then starts its private proxy
-        // from inside the target UID. Exported routes continue to use the
-        // direct Activity PendingIntent so HyperOS can provide its normal
-        // conversation/floating-window affordances.
+        // send time. Route those clicks through an isolated user-click hand-off;
+        // it brings the target task forward before delivering the payload to
+        // the target SDK. Exported routes continue to use the direct Activity
+        // PendingIntent so HyperOS can provide its normal conversation and
+        // floating-window affordances.
         boolean targetActivityExported = isActivityExported(context, activityIntent);
-        if (replaySenderRoute || !targetActivityExported) {
+        if (shouldUseClickTrampoline(replaySenderRoute, targetActivityExported)) {
             Intent clickTrampoline = new Intent(context,
                     com.xiaomi.xmsf.NotificationClickActivity.class);
             clickTrampoline.putExtras(extra);
@@ -845,9 +844,20 @@ public class MyMIPushNotificationHelper {
             clickTrampoline.putExtra(
                     com.xiaomi.xmsf.NotificationClickActivity.EXTRA_MANUAL_REPLAY,
                     replaySenderRoute);
-            extra.putBoolean(EXTRA_ACTIVITY_CLICK_PENDING_INTENT, true);
-            return PendingIntent.getActivity(context, notificationId, clickTrampoline,
-                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            clickTrampoline.putExtra(
+                    com.xiaomi.xmsf.NotificationClickActivity.EXTRA_TARGET_PACKAGE,
+                    container.getPackageName());
+            clickTrampoline.setData(new Uri.Builder()
+                    .scheme("xmsf-notification")
+                    .authority("click")
+                    .appendPath(container.getPackageName())
+                    .appendPath(Integer.toString(notificationId))
+                    .build());
+            clickTrampoline.addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
+            return ClickPendingIntent.activity(PendingIntent.getActivity(
+                    context, notificationId, clickTrampoline,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
         }
 
         // Keep the official MiPush click contract for sender-declared routes
@@ -860,9 +870,39 @@ public class MyMIPushNotificationHelper {
             activityIntent.putExtra("mipush_serviceIntent", intent);
             activityIntent.putExtras(intent);
         }
-        extra.putBoolean(EXTRA_ACTIVITY_CLICK_PENDING_INTENT, true);
-        return PendingIntent.getActivity(context, notificationId, activityIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        return ClickPendingIntent.activity(PendingIntent.getActivity(
+                context, notificationId, activityIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
+    }
+
+    /** API-independent PendingIntent type contract; PendingIntent.isActivity() requires API 31. */
+    private static final class ClickPendingIntent {
+        final PendingIntent pendingIntent;
+        final boolean activity;
+
+        private ClickPendingIntent(PendingIntent pendingIntent, boolean activity) {
+            this.pendingIntent = pendingIntent;
+            this.activity = activity;
+        }
+
+        static ClickPendingIntent activity(PendingIntent pendingIntent) {
+            return new ClickPendingIntent(pendingIntent, true);
+        }
+
+        static ClickPendingIntent service(PendingIntent pendingIntent) {
+            return new ClickPendingIntent(pendingIntent, false);
+        }
+    }
+
+    /** Only a service contentIntent needs HyperOS's auxiliary service whitelist token. */
+    static boolean shouldCarryTemporaryWhitelist(boolean activityPendingIntent) {
+        return !activityPendingIntent;
+    }
+
+    /** SDK-owned/private routes use the isolated hand-off; exported live routes stay direct. */
+    static boolean shouldUseClickTrampoline(
+            boolean replaySenderRoute, boolean targetActivityExported) {
+        return replaySenderRoute || !targetActivityExported;
     }
 
     /**

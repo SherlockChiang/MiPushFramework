@@ -1,11 +1,18 @@
 package com.xiaomi.xmsf;
 
 import android.app.Activity;
+import android.app.ActivityManager;
+import android.app.KeyguardManager;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.PowerManager;
+import android.os.SystemClock;
 import android.util.Log;
 
 import androidx.annotation.Nullable;
@@ -16,6 +23,8 @@ import com.xiaomi.push.service.PushConstants;
 import com.xiaomi.xmpush.thrift.XmPushActionContainer;
 
 import com.nihility.XMPushUtils;
+
+import top.trumeet.common.override.ActivityManagerOverride;
 
 /**
  * User-initiated notification click hand-off.
@@ -37,8 +46,49 @@ public final class NotificationClickActivity extends Activity {
             "com.xiaomi.xmsf.extra.NOTIFICATION_TARGET_ACTIVITY_PRIVATE";
     public static final String EXTRA_MANUAL_REPLAY =
             "com.xiaomi.xmsf.extra.NOTIFICATION_MANUAL_REPLAY";
+    public static final String EXTRA_TARGET_PACKAGE =
+            "com.xiaomi.xmsf.extra.NOTIFICATION_TARGET_PACKAGE";
 
     private static final String TAG = "MiPushClick";
+    private static final long TARGET_VISIBILITY_TIMEOUT_MS = 2_000L;
+    private static final long TARGET_VISIBILITY_POLL_MS = 50L;
+
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    @Nullable private Intent pendingClickIntent;
+    @Nullable private Intent pendingServiceIntent;
+    @Nullable private Intent pendingTargetIntent;
+    @Nullable private byte[] pendingPayload;
+    @Nullable private XmPushActionContainer pendingContainer;
+    @Nullable private String pendingTargetPackage;
+    private boolean pendingTargetActivityPrivate;
+    private boolean pendingManualReplay;
+    private boolean dispatchAfterTargetVisible;
+    private boolean targetTaskPrimed;
+    private boolean dispatched;
+    private boolean stopped;
+    private long targetLaunchStartedAt;
+
+    private final Runnable targetVisibilityProbe = new Runnable() {
+        @Override
+        public void run() {
+            if (!dispatchAfterTargetVisible || dispatched) {
+                return;
+            }
+            if ((isTargetTaskVisible() || targetTaskPrimed && stopped)
+                    && isUserPresent()) {
+                completeClick();
+                return;
+            }
+            if (SystemClock.uptimeMillis() - targetLaunchStartedAt
+                    >= TARGET_VISIBILITY_TIMEOUT_MS) {
+                abandonAfterTargetLaunch(isUserPresent()
+                        ? "TARGET_UI_TIMEOUT" : "USER_NOT_PRESENT");
+                return;
+            }
+            mainHandler.postDelayed(this, TARGET_VISIBILITY_POLL_MS);
+        }
+    };
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -46,9 +96,42 @@ public final class NotificationClickActivity extends Activity {
         dispatchClick(getIntent());
     }
 
+    @Override
+    protected void onStop() {
+        super.onStop();
+        stopped = true;
+        // For an ordinary opaque launcher, Android stops this trampoline only
+        // after the target Activity has become visible. This is the fastest and
+        // deterministic hand-off point; the bounded probe above covers
+        // translucent launchers that only pause us.
+        if (dispatchAfterTargetVisible && !dispatched && isUserPresent()) {
+            mainHandler.post(targetVisibilityProbe);
+        }
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        stopped = false;
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (!hasFocus && dispatchAfterTargetVisible && !dispatched) {
+            mainHandler.post(targetVisibilityProbe);
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        mainHandler.removeCallbacks(targetVisibilityProbe);
+        super.onDestroy();
+    }
+
     private void dispatchClick(@Nullable Intent clickIntent) {
         if (clickIntent == null) {
-            finish();
+            finishClickTask();
             return;
         }
 
@@ -73,86 +156,219 @@ public final class NotificationClickActivity extends Activity {
                 EXTRA_TARGET_ACTIVITY_PRIVATE, false);
         boolean manualReplay = clickIntent.getBooleanExtra(EXTRA_MANUAL_REPLAY, false);
 
+        pendingClickIntent = clickIntent;
+        pendingServiceIntent = serviceIntent;
+        pendingTargetIntent = targetIntent;
+        pendingPayload = payload;
+        pendingContainer = container;
+        pendingTargetActivityPrivate = targetActivityPrivate;
+        pendingManualReplay = manualReplay;
+        pendingTargetPackage = resolveTargetPackage(clickIntent, container, targetIntent);
+
+        if (TargetSdkClickDispatcher.shouldPrimeTargetTask(
+                manualReplay, targetActivityPrivate)) {
+            if (isTargetTaskVisible() && isUserPresent()) {
+                completeClick();
+                return;
+            }
+            targetLaunchStartedAt = SystemClock.uptimeMillis();
+            if (!startTargetLauncher(pendingTargetPackage)) {
+                completeClickWithoutConfirmedTarget("TARGET_LAUNCH_UNAVAILABLE");
+                return;
+            }
+            targetTaskPrimed = true;
+            dispatchAfterTargetVisible = true;
+            mainHandler.post(targetVisibilityProbe);
+            return;
+        }
+
+        completeClick();
+    }
+
+    private void completeClick() {
+        if (dispatched) {
+            return;
+        }
+        dispatched = true;
+        dispatchAfterTargetVisible = false;
+        mainHandler.removeCallbacks(targetVisibilityProbe);
+
+        Intent clickIntent = pendingClickIntent;
+        Intent targetIntent = pendingTargetIntent;
+        byte[] payload = pendingPayload;
+        XmPushActionContainer container = pendingContainer;
+
         try {
-            if (manualReplay) {
+            if (pendingManualReplay) {
                 TargetSdkClickDispatcher.DispatchResult result =
                         TargetSdkClickDispatcher.dispatchReplay(this, container);
-                if (TargetSdkClickDispatcher.shouldLaunchReplayFallback(result)) {
-                    Log.w(TAG, "manual replay SDK hand-off failed: " + result);
-                    startTargetLauncher(container);
+                if (!result.isAccepted()) {
+                    Log.w(TAG, "manual replay SDK delivery not accepted: " + result);
                 }
-            } else if (container != null && payload != null) {
-                // This is the official generic click contract, now executed from
-                // a user-initiated Activity instead of a background Service. Send
-                // the complete payload through the target SDK first, then open the
-                // sender-provided route (or the validated Launcher fallback).
-                boolean forwarded = false;
-                try {
-                    forwarded = MyPushMessageHandler.forwardToTargetApplication(this, payload)
-                            != null;
-                    if (!forwarded) {
-                        Log.w(TAG, "target SDK click bridge returned no component");
+            } else if (pendingTargetActivityPrivate && container != null && payload != null) {
+                TargetSdkClickDispatcher.DispatchResult result =
+                        TargetSdkClickDispatcher.dispatchPayload(this, container, payload);
+                if (!result.isAccepted()) {
+                    Log.w(TAG, "target SDK click delivery not accepted: " + result);
+                    if (!targetTaskPrimed && clickIntent != null) {
+                        startTargetActivity(targetIntent, clickIntent, container, true);
                     }
-                } catch (Throwable forwardError) {
-                    // A private proxy may not expose the MiPush bridge service.
-                    // Continue with the exported route/launcher fallback below.
-                    Log.w(TAG, "target SDK click bridge unavailable", forwardError);
                 }
-                if (!targetActivityPrivate || !forwarded) {
-                    startTargetActivity(targetIntent, clickIntent, container, targetActivityPrivate);
-                }
-            } else {
+            } else if (!targetTaskPrimed && clickIntent != null) {
                 // A malformed/stale click must still try the validated target route.
-                startTargetActivity(targetIntent, clickIntent, null, targetActivityPrivate);
+                startTargetActivity(
+                        targetIntent, clickIntent, container, pendingTargetActivityPrivate);
+            } else if (!pendingTargetActivityPrivate && clickIntent != null) {
+                // Defensive compatibility for an exported route that was wrapped
+                // by an older notification already present in the shade.
+                startTargetActivity(targetIntent, clickIntent, container, false);
             }
         } catch (Throwable error) {
             Log.w(TAG, "notification click hand-off failed", error);
             try {
-                if (manualReplay) {
-                    startTargetLauncher(container);
-                } else {
-                    // Live notifications retain their existing validated route.
-                    startTargetActivity(
-                            targetIntent, clickIntent, container, targetActivityPrivate);
+                if (!targetTaskPrimed) {
+                    if (pendingManualReplay) {
+                        startTargetLauncher(pendingTargetPackage);
+                    } else if (clickIntent != null) {
+                        startTargetActivity(
+                                targetIntent, clickIntent, container,
+                                pendingTargetActivityPrivate);
+                    }
                 }
             } catch (Throwable fallbackError) {
                 Log.w(TAG, "notification click Activity fallback failed", fallbackError);
             }
         } finally {
-            Bundle notificationExtras = serviceIntent == null
-                    ? clickIntent.getExtras() : serviceIntent.getExtras();
-            if (container != null && notificationExtras != null) {
-                try {
-                    MyPushMessageHandler.cancelNotification(this, notificationExtras, container);
-                } catch (Throwable error) {
-                    Log.w(TAG, "unable to cancel clicked notification", error);
-                }
+            cancelClickedNotification();
+            finishClickTask();
+        }
+    }
+
+    private void completeClickWithoutConfirmedTarget(String reason) {
+        if (dispatched) {
+            return;
+        }
+        Log.w(TAG, reason + ": delivering payload with isolated-task fallback");
+        completeClick();
+    }
+
+    private void abandonAfterTargetLaunch(String reason) {
+        if (dispatched) {
+            return;
+        }
+        dispatched = true;
+        dispatchAfterTargetVisible = false;
+        mainHandler.removeCallbacks(targetVisibilityProbe);
+        Log.w(TAG, reason + ": retaining target launcher fallback without SDK delivery");
+        cancelClickedNotification();
+        finishClickTask();
+    }
+
+    private void cancelClickedNotification() {
+        Intent clickIntent = pendingClickIntent;
+        Intent serviceIntent = pendingServiceIntent;
+        XmPushActionContainer container = pendingContainer;
+        Bundle notificationExtras = serviceIntent != null
+                ? serviceIntent.getExtras()
+                : (clickIntent == null ? null : clickIntent.getExtras());
+        if (container != null && notificationExtras != null) {
+            try {
+                MyPushMessageHandler.cancelNotification(this, notificationExtras, container);
+            } catch (Throwable error) {
+                Log.w(TAG, "unable to cancel clicked notification", error);
             }
-            finish();
         }
     }
 
     /** Replay payloads may contain stale vendor bridge tokens; failure opens only the app root. */
-    private void startTargetLauncher(@Nullable XmPushActionContainer container) {
-        String targetPackage = container == null ? null : container.getPackageName();
-        if (targetPackage == null) {
-            return;
+    private boolean startTargetLauncher(@Nullable String targetPackage) {
+        if (targetPackage == null || targetPackage.equals(getPackageName())) {
+            return false;
         }
         Intent launch = getPackageManager().getLaunchIntentForPackage(targetPackage);
         if (launch == null) {
-            return;
+            return false;
         }
         ResolveInfo resolved = getPackageManager().resolveActivity(
-                launch, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY);
+                launch, PackageManager.MATCH_DEFAULT_ONLY);
         if (resolved == null || resolved.activityInfo == null
                 || !resolved.activityInfo.exported
+                || !resolved.activityInfo.enabled
+                || (resolved.activityInfo.applicationInfo != null
+                && !resolved.activityInfo.applicationInfo.enabled)
                 || !targetPackage.equals(resolved.activityInfo.packageName)) {
-            return;
+            return false;
         }
         launch.setComponent(new ComponentName(
                 resolved.activityInfo.packageName, resolved.activityInfo.name));
-        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        startActivity(launch);
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+        try {
+            startActivity(launch);
+            return true;
+        } catch (ActivityNotFoundException | SecurityException error) {
+            Log.w(TAG, "unable to prime target launcher: " + targetPackage, error);
+            return false;
+        }
+    }
+
+    private boolean isTargetTaskVisible() {
+        if (pendingTargetPackage == null) {
+            return false;
+        }
+        ActivityManager activityManager = getSystemService(ActivityManager.class);
+        if (activityManager == null) {
+            return false;
+        }
+        try {
+            int importance = ActivityManagerOverride.getPackageImportance(
+                    pendingTargetPackage, activityManager);
+            return importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
+                    || importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE;
+        } catch (Throwable unavailable) {
+            // Usage access and hidden-API availability differ across third-party
+            // ROMs. onStop remains the portable opaque-Activity readiness signal.
+            return false;
+        }
+    }
+
+    private boolean isUserPresent() {
+        PowerManager powerManager = getSystemService(PowerManager.class);
+        KeyguardManager keyguardManager = getSystemService(KeyguardManager.class);
+        return powerManager != null && powerManager.isInteractive()
+                && (keyguardManager == null || !keyguardManager.isKeyguardLocked());
+    }
+
+    @Nullable
+    private String resolveTargetPackage(
+            Intent clickIntent,
+            @Nullable XmPushActionContainer container,
+            @Nullable Intent targetIntent) {
+        String trustedPackage = clickIntent.getStringExtra(EXTRA_TARGET_PACKAGE);
+        if (container != null && container.getPackageName() != null) {
+            if (trustedPackage != null && !trustedPackage.isEmpty()
+                    && !trustedPackage.equals(container.getPackageName())) {
+                Log.w(TAG, "target package marker does not match payload");
+                return null;
+            }
+            return container.getPackageName();
+        }
+        if (trustedPackage != null && !trustedPackage.isEmpty()) {
+            return trustedPackage;
+        }
+        ComponentName targetComponent = targetIntent == null ? null : targetIntent.getComponent();
+        if (targetComponent != null) {
+            return targetComponent.getPackageName();
+        }
+        return targetIntent == null ? null : targetIntent.getPackage();
+    }
+
+    private void finishClickTask() {
+        if (isTaskRoot()) {
+            finishAndRemoveTask();
+        } else {
+            finish();
+        }
     }
 
     private void startTargetActivity(

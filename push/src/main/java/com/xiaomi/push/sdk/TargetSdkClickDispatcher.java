@@ -1,5 +1,7 @@
 package com.xiaomi.push.sdk;
 
+import android.app.ActivityOptions;
+import android.app.PendingIntent;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -8,6 +10,8 @@ import android.content.pm.ComponentInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.content.pm.ServiceInfo;
+import android.os.Build;
+import android.os.Bundle;
 
 import androidx.annotation.Nullable;
 
@@ -24,7 +28,17 @@ import java.util.Comparator;
 import java.util.Collections;
 import java.util.List;
 
-/** Capability-based SDK click delivery used only for historical notification replay. */
+/**
+ * Capability-based SDK click delivery for routes owned by the target MiPush SDK.
+ *
+ * <p>A notification click may enter XMSF first when the sender-declared Activity
+ * is private. Starting the target service directly while the target UID is
+ * still backgrounded is rejected by modern Android. The trampoline first
+ * establishes a visible target task; this dispatcher then uses an immutable,
+ * one-shot PendingIntent so supported platform/OEM implementations can also
+ * retain the user-initiated hand-off metadata. Neither mechanism requires
+ * package-specific routing.</p>
+ */
 public final class TargetSdkClickDispatcher {
     private static final String SDK_SERVICE_CLASS =
             MyMIPushNotificationHelper.CLASS_NAME_PUSH_MESSAGE_HANDLER;
@@ -32,13 +46,15 @@ public final class TargetSdkClickDispatcher {
             ".permission.MIPUSH_RECEIVE";
 
     public enum DispatchResult {
-        SERVICE_STARTED,
-        BROADCAST_SENT,
+        SERVICE_DELIVERY_ACCEPTED,
+        BROADCAST_DELIVERY_ACCEPTED,
         UNAVAILABLE,
         FAILED;
 
-        public boolean isSuccess() {
-            return this == SERVICE_STARTED || this == BROADCAST_SENT;
+        /** Delivery acceptance is deliberately not a claim that navigation completed. */
+        public boolean isAccepted() {
+            return this == SERVICE_DELIVERY_ACCEPTED
+                    || this == BROADCAST_DELIVERY_ACCEPTED;
         }
     }
 
@@ -80,9 +96,10 @@ public final class TargetSdkClickDispatcher {
     private TargetSdkClickDispatcher() {
     }
 
-    /** A successful SDK hand-off owns navigation; only failure may open the launcher. */
-    public static boolean shouldLaunchReplayFallback(DispatchResult result) {
-        return result == null || !result.isSuccess();
+    /** Private and replay routes need a visible target task behind the SDK hand-off. */
+    public static boolean shouldPrimeTargetTask(
+            boolean manualReplay, boolean targetActivityPrivate) {
+        return manualReplay || targetActivityPrivate;
     }
 
     static String receiverPermission(String targetPackage) {
@@ -95,18 +112,6 @@ public final class TargetSdkClickDispatcher {
                 || replayContainer.getPackageName() == null) {
             return DispatchResult.UNAVAILABLE;
         }
-        String targetPackage = replayContainer.getPackageName();
-        final Capability capability;
-        try {
-            capability = selectCapability(
-                    targetPackage, new AndroidCapabilitySource(context.getPackageManager()));
-        } catch (Throwable ignored) {
-            return DispatchResult.FAILED;
-        }
-        if (capability == null) {
-            return DispatchResult.UNAVAILABLE;
-        }
-
         XmPushActionContainer targetContainer =
                 NotificationReplayMarker.copyWithoutMarker(replayContainer);
         if (targetContainer == null) {
@@ -119,13 +124,37 @@ public final class TargetSdkClickDispatcher {
             return DispatchResult.FAILED;
         }
 
+        return dispatchPayload(context, targetContainer, targetPayload);
+    }
+
+    /** Deliver an unmodified live-notification payload through the target SDK. */
+    public static DispatchResult dispatchPayload(
+            Context context,
+            @Nullable XmPushActionContainer container,
+            @Nullable byte[] targetPayload) {
+        if (context == null || container == null || targetPayload == null
+                || targetPayload.length == 0 || container.getPackageName() == null) {
+            return DispatchResult.UNAVAILABLE;
+        }
+        String targetPackage = container.getPackageName();
+        final Capability capability;
+        try {
+            capability = selectCapability(
+                    targetPackage, new AndroidCapabilitySource(context.getPackageManager()));
+        } catch (Throwable ignored) {
+            return DispatchResult.FAILED;
+        }
+        if (capability == null) {
+            return DispatchResult.UNAVAILABLE;
+        }
+
         Intent targetIntent = new Intent(PushConstants.MIPUSH_ACTION_NEW_MESSAGE)
                 .setPackage(targetPackage)
                 .putExtra(PushConstants.MIPUSH_EXTRA_PAYLOAD, targetPayload)
                 .putExtra(PushConstants.MESSAGE_RECEIVE_TIME,
                         Long.toString(System.currentTimeMillis()))
                 .putExtra(MIPushNotificationHelper.FROM_NOTIFICATION, true);
-        PushMetaInfo metaInfo = targetContainer.getMetaInfo();
+        PushMetaInfo metaInfo = container.getMetaInfo();
 
         try {
             if (capability.kind == Kind.SERVICE) {
@@ -134,19 +163,53 @@ public final class TargetSdkClickDispatcher {
                 if (metaInfo != null) {
                     targetIntent.addCategory(String.valueOf(metaInfo.getNotifyId()));
                 }
-                return context.startService(targetIntent) == null
-                        ? DispatchResult.FAILED : DispatchResult.SERVICE_STARTED;
+                sendAsUserInitiatedPendingIntent(
+                        context, targetIntent, capability.kind, targetPackage, metaInfo);
+                return DispatchResult.SERVICE_DELIVERY_ACCEPTED;
             }
             // Match the Xiaomi SDK's normal broadcast contract. Keep the
             // package scope so every receiver registered by the target SDK can
             // participate (Agoo/vendor bridges often fan out internally), while
             // the package-scoped permission lets signature/privileged receivers
             // accept the replay.
-            context.sendBroadcast(targetIntent, receiverPermission(targetPackage));
-            return DispatchResult.BROADCAST_SENT;
+            sendAsUserInitiatedPendingIntent(
+                    context, targetIntent, capability.kind, targetPackage, metaInfo);
+            return DispatchResult.BROADCAST_DELIVERY_ACCEPTED;
         } catch (Throwable ignored) {
             return DispatchResult.FAILED;
         }
+    }
+
+    private static void sendAsUserInitiatedPendingIntent(
+            Context context,
+            Intent targetIntent,
+            Kind kind,
+            String targetPackage,
+            @Nullable PushMetaInfo metaInfo) throws PendingIntent.CanceledException {
+        int notifyId = metaInfo == null ? 0 : metaInfo.getNotifyId();
+        int requestCode = deliveryRequestCode(targetPackage, notifyId, kind);
+        int flags = PendingIntent.FLAG_CANCEL_CURRENT
+                | PendingIntent.FLAG_ONE_SHOT
+                | PendingIntent.FLAG_IMMUTABLE;
+        PendingIntent pendingIntent = kind == Kind.SERVICE
+                ? PendingIntent.getService(context, requestCode, targetIntent, flags)
+                : PendingIntent.getBroadcast(context, requestCode, targetIntent, flags);
+
+        Bundle options = null;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            ActivityOptions activityOptions = ActivityOptions.makeBasic();
+            activityOptions.setPendingIntentBackgroundActivityStartMode(
+                    ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED);
+            options = activityOptions.toBundle();
+        }
+        String requiredPermission = kind == Kind.RECEIVER
+                ? receiverPermission(targetPackage) : null;
+        pendingIntent.send(context, 0, null, null, null, requiredPermission, options);
+    }
+
+    static int deliveryRequestCode(String targetPackage, int notifyId, Kind kind) {
+        String identity = String.valueOf(targetPackage) + ':' + notifyId + ':' + kind;
+        return identity.hashCode();
     }
 
     @Nullable

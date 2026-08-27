@@ -70,15 +70,15 @@
 
         <!--
             Notification clicks enter this transparent, internal hand-off first.
-            It forwards the full MiPush payload to the target SDK before opening
-            the sender-provided Activity, preserving vendor bridge callbacks on
-            Android 16/HyperOS without per-application adapters.
+            Private SDK routes first establish a visible target task and then
+            forward the full MiPush payload, preserving vendor bridge callbacks
+            on Android 16/HyperOS without per-application adapters.
         -->
         <activity
                 android:name=".NotificationClickActivity"
                 android:excludeFromRecents="true"
                 android:exported="false"
-                android:noHistory="true"
+                android:taskAffinity=""
                 android:theme="@style/Theme.NotificationClick" />
 
         <activity

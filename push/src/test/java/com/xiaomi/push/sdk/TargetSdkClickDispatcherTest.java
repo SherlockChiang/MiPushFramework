@@ -70,16 +70,33 @@ public class TargetSdkClickDispatcherTest {
     }
 
     @Test
-    public void onlySuccessfulDispatchSuppressesLauncherFallback() {
-        assertFalse(TargetSdkClickDispatcher.shouldLaunchReplayFallback(
-                TargetSdkClickDispatcher.DispatchResult.SERVICE_STARTED));
-        assertFalse(TargetSdkClickDispatcher.shouldLaunchReplayFallback(
-                TargetSdkClickDispatcher.DispatchResult.BROADCAST_SENT));
-        assertTrue(TargetSdkClickDispatcher.shouldLaunchReplayFallback(
-                TargetSdkClickDispatcher.DispatchResult.UNAVAILABLE));
-        assertTrue(TargetSdkClickDispatcher.shouldLaunchReplayFallback(
-                TargetSdkClickDispatcher.DispatchResult.FAILED));
-        assertTrue(TargetSdkClickDispatcher.shouldLaunchReplayFallback(null));
+    public void deliveryAcceptanceDoesNotUseNavigationTerminology() {
+        assertTrue(TargetSdkClickDispatcher.DispatchResult.SERVICE_DELIVERY_ACCEPTED
+                .isAccepted());
+        assertTrue(TargetSdkClickDispatcher.DispatchResult.BROADCAST_DELIVERY_ACCEPTED
+                .isAccepted());
+        assertFalse(TargetSdkClickDispatcher.DispatchResult.UNAVAILABLE.isAccepted());
+        assertFalse(TargetSdkClickDispatcher.DispatchResult.FAILED.isAccepted());
+    }
+
+    @Test
+    public void privateAndReplayRoutesPrimeTargetTask() {
+        assertTrue(TargetSdkClickDispatcher.shouldPrimeTargetTask(false, true));
+        assertTrue(TargetSdkClickDispatcher.shouldPrimeTargetTask(true, false));
+        assertTrue(TargetSdkClickDispatcher.shouldPrimeTargetTask(true, true));
+        assertFalse(TargetSdkClickDispatcher.shouldPrimeTargetTask(false, false));
+    }
+
+    @Test
+    public void oneShotDeliveryIdentitySeparatesPackageNotificationAndCapability() {
+        int baseline = TargetSdkClickDispatcher.deliveryRequestCode(
+                "example.a", 42, TargetSdkClickDispatcher.Kind.SERVICE);
+        assertFalse(baseline == TargetSdkClickDispatcher.deliveryRequestCode(
+                "example.b", 42, TargetSdkClickDispatcher.Kind.SERVICE));
+        assertFalse(baseline == TargetSdkClickDispatcher.deliveryRequestCode(
+                "example.a", 43, TargetSdkClickDispatcher.Kind.SERVICE));
+        assertFalse(baseline == TargetSdkClickDispatcher.deliveryRequestCode(
+                "example.a", 42, TargetSdkClickDispatcher.Kind.RECEIVER));
     }
 
     @Test
