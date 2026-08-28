@@ -6,11 +6,11 @@ import android.app.NotificationChannelGroup
 import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
+import android.os.SystemClock
 import android.os.UserHandle
 import android.service.notification.StatusBarNotification
 import androidx.annotation.RequiresApi
 import com.elvishew.xlog.XLog
-import top.trumeet.common.utils.DeviceFocusPolicy
 
 object NotificationManagerEx {
     private const val TAG = "NotificationManagerEx"
@@ -19,6 +19,10 @@ object NotificationManagerEx {
     private lateinit var notificationContext: Context
     private var notificationService: Any? = null
     private var packageAttributionSupported: Boolean? = null
+    private var lastCapabilityProbeAt: Long = 0L
+
+    private const val CAPABILITY_RETRY_INTERVAL_MS = 1_000L
+    private const val XMSF_FAKE_CONDITION_PROVIDER_PATH = "xmsf_fake_condition_provider_path"
 
     @JvmField
     var isHooked: Boolean = false
@@ -29,6 +33,7 @@ object NotificationManagerEx {
         notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationService = invokeHidden(notificationManager, "getService", emptyArray()).value
         packageAttributionSupported = null
+        lastCapabilityProbeAt = 0L
     }
 
     fun notify(
@@ -60,18 +65,19 @@ object NotificationManagerEx {
      * calling the hidden API; unsupported/AOSP builds retain the public fallback.
      */
     private fun supportsPackageAttribution(): Boolean {
-        packageAttributionSupported?.let { return it }
+        if (packageAttributionSupported == true) return true
         if (!::notificationManager.isInitialized) return false
-        // A stale/compatibility Xposed hook must not turn on Xiaomi's hidden
-        // package-attributed API on Sony, AOSP, or another non-Xiaomi ROM.
-        if (!DeviceFocusPolicy.isXiaomiManufacturer(Build.MANUFACTURER)) {
-            packageAttributionSupported = false
+        val now = SystemClock.elapsedRealtime()
+        if (packageAttributionSupported == false &&
+            now - lastCapabilityProbeAt < CAPABILITY_RETRY_INTERVAL_MS
+        ) {
             return false
         }
+        lastCapabilityProbeAt = now
         val supported = (invokeHidden(
             "isSystemConditionProviderEnabled",
             arrayOf(String::class.java),
-            arrayOf("xmsf_fake_condition_provider_path")
+            arrayOf(XMSF_FAKE_CONDITION_PROVIDER_PATH),
         ).value as? Boolean) == true
         packageAttributionSupported = supported
         return supported
@@ -87,13 +93,23 @@ object NotificationManagerEx {
             return false
         }
         return try {
-            val method = notificationManager.javaClass.getDeclaredMethod(
-                "notifyAsPackage",
-                String::class.java,
-                String::class.java,
-                Int::class.javaPrimitiveType,
-                Notification::class.java,
-            )
+            val method = try {
+                notificationManager.javaClass.getDeclaredMethod(
+                    "notifyAsPackage",
+                    String::class.java,
+                    String::class.java,
+                    Int::class.javaPrimitiveType,
+                    Notification::class.java,
+                )
+            } catch (_: NoSuchMethodException) {
+                notificationManager.javaClass.getMethod(
+                    "notifyAsPackage",
+                    String::class.java,
+                    String::class.java,
+                    Int::class.javaPrimitiveType,
+                    Notification::class.java,
+                )
+            }
             method.isAccessible = true
             method.invoke(notificationManager, packageName, tag, id, notification)
             true
