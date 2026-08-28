@@ -1,10 +1,12 @@
 package top.trumeet.mipushframework.main
 
 import android.Manifest
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -72,12 +75,40 @@ class MainPage : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        // Configure the system bar before the first Compose frame.  Otherwise Android may keep
+        // the theme's opaque navigation-bar color for the first layout pass, which is especially
+        // visible below the floating dock on gesture-navigation devices.
+        window.navigationBarColor = Color.Transparent.toArgb()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.navigationBarDividerColor = Color.Transparent.toArgb()
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+        }
         mainPageUtils.initOnCreate(applicationContext) { placeholder = it.toString() }
         setContent {
             Theme {
-                window.navigationBarColor = MiuixTheme.colorScheme.surfaceContainer.toArgb()
                 var floatingBottomNav by rememberSaveable {
                     mutableStateOf(Global.ConfigCenter().isFloatingBottomNavigation(applicationContext))
+                }
+                val navigationBarColor = if (floatingBottomNav) {
+                    Color.Transparent
+                } else {
+                    MiuixTheme.colorScheme.surfaceContainer
+                }
+                val decorBackgroundColor = MiuixTheme.colorScheme.background.toArgb()
+                SideEffect {
+                    // Some OEM window managers keep drawing the decor background underneath a
+                    // transparent navigation bar. Keep that fallback in sync with the Miuix
+                    // surface so the area outside the floating island never becomes a black row.
+                    window.decorView.setBackgroundColor(decorBackgroundColor)
+                    window.navigationBarColor = navigationBarColor.toArgb()
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        window.navigationBarDividerColor = navigationBarColor.toArgb()
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        window.isNavigationBarContrastEnforced = !floatingBottomNav
+                    }
                 }
                 Main(
                     startDestination = Screen.Apps.route.toString(),
@@ -270,75 +301,87 @@ private fun Main(
     }
     val swipeThresholdPx = with(LocalDensity.current) { 72.dp.toPx() }
 
-    MiuixPageScaffold(
-        modifier = Modifier.fillMaxSize(),
-        bottomBar = {
-            if (floatingBottomNav) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        // Miuix's floating navigation pattern keeps a small breathing room above
-                        // the gesture bar; the bar itself owns its intrinsic width.
-                        .padding(bottom = 12.dp),
-                    contentAlignment = Alignment.BottomCenter,
-                ) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            // Keep the window area behind the dock and the gesture handle painted by the same
+            // Miuix background as the page.  The system navigation bar is transparent in floating
+            // mode, so this also prevents a theme/default black strip from showing through.
+            .background(MiuixTheme.colorScheme.background),
+    ) {
+        MiuixPageScaffold(
+            modifier = Modifier.fillMaxSize(),
+            bottomBar = {
+                if (!floatingBottomNav) {
                     BottomNavigationBar(
                         navController = navController,
-                        floating = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        floating = false,
                         initialRoute = startDestination,
                     )
                 }
-            } else {
+            },
+        ) { paddingValues ->
+            NavHost(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .consumeWindowInsets(paddingValues)
+                    // Keep the existing NavHost/back-stack architecture and add a lightweight
+                    // page-level gesture. Vertical scrolling remains owned by each page; this
+                    // detector only starts after horizontal touch-slop and commits on a full swipe.
+                    .pointerInput(currentRoute, swipeThresholdPx) {
+                        var dragDistancePx = 0f
+                        detectHorizontalDragGestures(
+                            onHorizontalDrag = { change, dragAmount ->
+                                change.consume()
+                                dragDistancePx += dragAmount
+                            },
+                            onDragEnd = {
+                                val targetRoute = routeAfterHorizontalSwipe(
+                                    currentRoute = currentRoute,
+                                    dragDistancePx = dragDistancePx,
+                                    thresholdPx = swipeThresholdPx,
+                                    routes = swipeRoutes,
+                                )
+                                if (targetRoute != null) {
+                                    navController.navigate(targetRoute) {
+                                        popUpTo(navController.graph.startDestinationId) {
+                                            saveState = true
+                                        }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                }
+                                dragDistancePx = 0f
+                            },
+                            onDragCancel = { dragDistancePx = 0f },
+                        )
+                    },
+                navController = navController,
+                startDestination = startDestination,
+                builder = navContent
+            )
+        }
+
+        if (floatingBottomNav) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    // This is an overlay rather than a Scaffold bottom bar: page content and its
+                    // themed background remain visible around the island, so the dock reads as
+                    // genuinely floating instead of occupying an opaque full-width row.
+                    .padding(bottom = 12.dp),
+                contentAlignment = Alignment.BottomCenter,
+            ) {
                 BottomNavigationBar(
                     navController = navController,
-                    modifier = Modifier.fillMaxWidth(),
-                    floating = false,
+                    floating = true,
                     initialRoute = startDestination,
                 )
             }
-        },
-    ) { paddingValues ->
-        NavHost(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .consumeWindowInsets(paddingValues)
-                // Keep the existing NavHost/back-stack architecture and add a lightweight
-                // page-level gesture. Vertical scrolling remains owned by each page; this
-                // detector only starts after horizontal touch-slop and commits on a full swipe.
-                .pointerInput(currentRoute, swipeThresholdPx) {
-                    var dragDistancePx = 0f
-                    detectHorizontalDragGestures(
-                        onHorizontalDrag = { change, dragAmount ->
-                            change.consume()
-                            dragDistancePx += dragAmount
-                        },
-                        onDragEnd = {
-                            val targetRoute = routeAfterHorizontalSwipe(
-                                currentRoute = currentRoute,
-                                dragDistancePx = dragDistancePx,
-                                thresholdPx = swipeThresholdPx,
-                                routes = swipeRoutes,
-                            )
-                            if (targetRoute != null) {
-                                navController.navigate(targetRoute) {
-                                    popUpTo(navController.graph.startDestinationId) {
-                                        saveState = true
-                                    }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            }
-                            dragDistancePx = 0f
-                        },
-                        onDragCancel = { dragDistancePx = 0f },
-                    )
-                },
-            navController = navController,
-            startDestination = startDestination,
-            builder = navContent
-        )
+        }
     }
 }
 

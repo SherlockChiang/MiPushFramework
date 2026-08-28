@@ -21,8 +21,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.runtime.Composable
@@ -252,9 +252,13 @@ fun MiuixBottomNavigation(
         // This file does not copy KernelSU source, assets, or its blur dependencies.
         // The compatibility path preserves the reference's 64/4/56/76dp geometry, draggable
         // indicator, RTL-aware motion and edge resistance without importing the newer blur stack.
+        val panelWidth = tabWidth * items.size + 8.dp
         Surface(
             modifier = modifier
-                .wrapContentWidth()
+                // A floating panel must own its intrinsic width.  `wrapContentWidth()` preserves
+                // a full-width parent constraint, which makes the Surface paint an opaque strip
+                // across the whole bottom row when this component is placed in an overlay.
+                .requiredWidth(panelWidth)
                 .graphicsLayer { translationX = panelOffsetPx },
             shape = SmoothRoundedCornerShape(32.dp),
             color = MiuixTheme.colorScheme.surfaceContainer,
@@ -263,7 +267,7 @@ fun MiuixBottomNavigation(
             Box(
                 modifier = Modifier
                     .height(64.dp)
-                    .width(tabWidth * items.size + 8.dp)
+                    .width(panelWidth)
                     .padding(4.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
