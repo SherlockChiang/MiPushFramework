@@ -170,6 +170,19 @@ public class MyMIPushNotificationHelper {
      */
     static final int NOTIFICATION_QUEUE_CAPACITY = 16;
     private static final java.util.concurrent.ThreadPoolExecutor executorService = createNotificationExecutor();
+    /**
+     * Keep updates for one Android notification identity ordered while still
+     * allowing unrelated applications/ids to use the three worker threads in
+     * parallel.  The dispatcher bounds payload retention to the same queue
+     * budget as the underlying executor.
+     */
+    private static final KeyedSerialDispatcher<NotificationKey> notificationDispatcher =
+            new KeyedSerialDispatcher<>(
+                    executorService,
+                    NOTIFICATION_QUEUE_CAPACITY,
+                    (key, failure) -> logger.e(
+                            "Notification task failed for " + key,
+                            failure));
 
     /**
      * Explicit wake operations are optional side effects.  Keep a short
@@ -218,7 +231,12 @@ public class MyMIPushNotificationHelper {
             logger.w("Do not notify because user block " + getTargetPackage(container) + "'s notification");
         } else {
             loadConfigurationsOnce(context);
-            handleNotificationByConfigurations(context, decryptedContent, container.getPackageName(), container);
+            // The SDK uses the wrapper package for some system-delivered
+            // messages and carries the real client in miui_package_name.
+            // Configuration matching must use the same target identity that
+            // will later own the published notification.
+            handleNotificationByConfigurations(
+                    context, decryptedContent, publishPackageName(container), container);
         }
     }
 
@@ -236,7 +254,11 @@ public class MyMIPushNotificationHelper {
         NotificationDispatchPipeline.dispatch(
                 plan,
                 () -> wakeScreen(appContext, packageName),
-                () -> executorService.execute(() -> {
+                // Configuration rules may rewrite the package or notify id.
+                // Derive the Android identity only after those rewrites have
+                // completed so every update reaches the queue that will
+                // actually publish it.
+                () -> notificationDispatcher.execute(notificationKeyFor(container), () -> {
                     try {
                         doNotifyPushMessage(appContext, container, decryptedContent);
                     } catch (Exception e) {
@@ -247,6 +269,47 @@ public class MyMIPushNotificationHelper {
                 (stage, exception) -> logger.e(
                         "Notification dispatch stage failed: " + stage,
                         exception));
+    }
+
+    /**
+     * Build the key from the exact package/tag/id tuple used by the current
+     * publish path.  Keeping this derivation in one place prevents a future
+     * target-package attribution change from silently creating a second queue
+     * for the same Android notification.
+     */
+    private static NotificationKey notificationKeyFor(XmPushActionContainer container) {
+        String packageName = publishPackageName(container);
+        return new NotificationKey(
+                packageName,
+                getNotificationTag(packageName),
+                getNotificationId(container));
+    }
+
+    private static String publishPackageName(XmPushActionContainer container) {
+        if (container == null) {
+            return "";
+        }
+        try {
+            String targetPackage = getTargetPackage(container);
+            if (!TextUtils.isEmpty(targetPackage)) {
+                return targetPackage;
+            }
+        } catch (Throwable error) {
+            logger.w("Unable to derive notification publish package", error);
+        }
+        if (!TextUtils.isEmpty(container.getPackageName())) {
+            return container.getPackageName();
+        }
+        return "";
+    }
+
+    /**
+     * Return the package that owns the rendered notification, including the
+     * miui_package_name target carried by system-wrapper messages.
+     */
+    public static String getNotificationTargetPackage(
+            @Nullable XmPushActionContainer container) {
+        return publishPackageName(container);
     }
 
     private static void loadConfigurationsOnce(Context context) {
@@ -332,7 +395,8 @@ public class MyMIPushNotificationHelper {
 
         NotificationInfo result = getNotificationFor(context, container, decryptedContent);
 
-        NotificationController.publish(context, metaInfo, result.notificationId, container.getPackageName(), result.notificationBuilder);
+        NotificationController.publish(context, metaInfo, result.notificationId,
+                publishPackageName(container), result.notificationBuilder);
     }
 
     private static void logPushMessage(PushMetaInfo metaInfo) {
@@ -345,7 +409,7 @@ public class MyMIPushNotificationHelper {
     @NonNull
     private static NotificationInfo getNotificationFor(Context context, XmPushActionContainer container, byte[] decryptedContent) {
         PushMetaInfo metaInfo = container.getMetaInfo();
-        String packageName = container.getPackageName();
+        String packageName = publishPackageName(container);
 
         Context pkgCtx = getPackageContext(context, packageName);
         NotificationCompat.MessagingStyle.Message message = createMessage(context, container, pkgCtx);
@@ -360,7 +424,7 @@ public class MyMIPushNotificationHelper {
             notificationBuilder = messagingStyleNotificationBuilder(context, container, notificationId, message, pkgCtx);
         } else {
             notificationBuilder = normalStyleNotificationBuilder(
-                    context, container.getPackageName(), container.getMetaInfo());
+                    context, packageName, container.getMetaInfo());
         }
 
         if (metaInfo.getExtra() != null) {
@@ -410,6 +474,49 @@ public class MyMIPushNotificationHelper {
         public NotificationInfo(int notificationId, NotificationCompat.Builder notificationBuilder) {
             this.notificationId = notificationId;
             this.notificationBuilder = notificationBuilder;
+        }
+    }
+
+    /**
+     * Immutable Android notification identity used by the keyed dispatcher.
+     * The tuple mirrors NotificationManagerEx.notify(package, tag, id).
+     */
+    static final class NotificationKey {
+        final String packageName;
+        final String tag;
+        final int id;
+
+        NotificationKey(String packageName, String tag, int id) {
+            this.packageName = packageName == null ? "" : packageName;
+            this.tag = tag == null ? "" : tag;
+            this.id = id;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof NotificationKey)) {
+                return false;
+            }
+            NotificationKey that = (NotificationKey) other;
+            return id == that.id
+                    && packageName.equals(that.packageName)
+                    && tag.equals(that.tag);
+        }
+
+        @Override
+        public int hashCode() {
+            int result = packageName.hashCode();
+            result = 31 * result + tag.hashCode();
+            result = 31 * result + id;
+            return result;
+        }
+
+        @Override
+        public String toString() {
+            return packageName + "/" + tag + "/" + id;
         }
     }
 
@@ -511,7 +618,7 @@ public class MyMIPushNotificationHelper {
     @NonNull
     private static NotificationCompat.Builder messagingStyleNotificationBuilder(
             Context context, XmPushActionContainer container, int notificationId, NotificationCompat.MessagingStyle.Message message, Context pkgCtx) {
-        String packageName = container.getPackageName();
+        String packageName = publishPackageName(container);
         NotificationCompat.Builder messagingBuilder = addToExistingMessageNotification(context, packageName, notificationId, message);
         if (messagingBuilder != null) {
             return messagingBuilder;
@@ -650,7 +757,8 @@ public class MyMIPushNotificationHelper {
     private static void carryPendingIntentForTemporarilyWhitelisted(Context xmPushService, XmPushActionContainer buildContainer, NotificationCompat.Builder localBuilder) {
         PushMetaInfo metaInfo = buildContainer.getMetaInfo();
         // Also carry along the target PendingIntent, whose target will get temporarily whitelisted for background-activity-start upon sent.
-        final Intent targetIntent = buildTargetIntentWithoutExtras(buildContainer.getPackageName(), metaInfo);
+        final Intent targetIntent = buildTargetIntentWithoutExtras(
+                publishPackageName(buildContainer), metaInfo);
         final PendingIntent pi = PendingIntent.getService(xmPushService, 0, targetIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         localBuilder.getExtras().putParcelable("mipush.target", pi);
@@ -668,12 +776,12 @@ public class MyMIPushNotificationHelper {
     }
 
     public static String getNotificationTag(XmPushActionContainer container) {
-        return getNotificationTag(container.packageName);
+        return getNotificationTag(publishPackageName(container));
     }
 
     private static String getGroupName(Context xmPushService, XmPushActionContainer buildContainer) {
         PushMetaInfo metaInfo = buildContainer.getMetaInfo();
-        String packageName = buildContainer.getPackageName();
+        String packageName = publishPackageName(buildContainer);
         RegisteredApplication application = RegisteredApplicationDb.getRegisteredApplication(packageName);
 
         CustomConfiguration configuration = XMPushUtils.getConfiguration(metaInfo);
@@ -734,7 +842,7 @@ public class MyMIPushNotificationHelper {
     }
 
     private static PendingIntent openActivityPendingIntent(Context paramContext, XmPushActionContainer paramXmPushActionContainer, PushMetaInfo paramPushMetaInfo, byte[] paramArrayOfByte) {
-        String packageName = paramXmPushActionContainer.getPackageName();
+        String packageName = publishPackageName(paramXmPushActionContainer);
         PackageManager packageManager = paramContext.getPackageManager();
         Intent localIntent1 = packageManager.getLaunchIntentForPackage(packageName);
         if (localIntent1 != null) {
@@ -752,6 +860,7 @@ public class MyMIPushNotificationHelper {
         if (metaInfo == null) {
             return null;
         }
+        String targetPackage = publishPackageName(container);
 
         // Resolve a safe sender-declared route before the legacy web shortcut:
         // a configuration may have replaced an SDK intent with a URL, and the
@@ -796,7 +905,7 @@ public class MyMIPushNotificationHelper {
                 ? restoredSenderRoute : resolveSdkClickRoute(context, container);
         Intent activityIntent = clickRoute == null ? null : clickRoute.intent;
         if (activityIntent == null) {
-            activityIntent = getLaunchIntent(context, container.getPackageName());
+            activityIntent = getLaunchIntent(context, targetPackage);
         }
         boolean replaySenderRoute = shouldUseReplayClickTrampoline(
                 NotificationReplayMarker.isMarked(container),
@@ -846,11 +955,11 @@ public class MyMIPushNotificationHelper {
                     replaySenderRoute);
             clickTrampoline.putExtra(
                     com.xiaomi.xmsf.NotificationClickActivity.EXTRA_TARGET_PACKAGE,
-                    container.getPackageName());
+                    targetPackage);
             clickTrampoline.setData(new Uri.Builder()
                     .scheme("xmsf-notification")
                     .authority("click")
-                    .appendPath(container.getPackageName())
+                    .appendPath(targetPackage)
                     .appendPath(Integer.toString(notificationId))
                     .build());
             clickTrampoline.addFlags(
@@ -942,8 +1051,8 @@ public class MyMIPushNotificationHelper {
 
         if (senderContainer != null
                 && configuredContainer != null
-                && Objects.equals(senderContainer.getPackageName(),
-                configuredContainer.getPackageName())
+                && Objects.equals(publishPackageName(senderContainer),
+                publishPackageName(configuredContainer))
                 && shouldPreferSenderClickContract(
                 senderContainer.getMetaInfo(), configuredContainer.getMetaInfo())) {
             ClickRouteResolution senderRoute =
@@ -952,7 +1061,7 @@ public class MyMIPushNotificationHelper {
                     && !senderRoute.discoveredRoute
                     && isActivityExported(context, senderRoute.intent)) {
                 logger.d("Restoring sender-declared notification click route for "
-                        + configuredContainer.getPackageName());
+                        + publishPackageName(configuredContainer));
                 return senderRoute;
             }
         }
@@ -1076,10 +1185,11 @@ public class MyMIPushNotificationHelper {
     @Nullable
     private static ClickRouteResolution resolveSdkClickRoute(
             Context context, XmPushActionContainer container) {
-        if (context == null || container == null || TextUtils.isEmpty(container.packageName)) {
+        if (context == null || container == null
+                || TextUtils.isEmpty(publishPackageName(container))) {
             return null;
         }
-        String pkgName = container.packageName;
+        String pkgName = publishPackageName(container);
         PushMetaInfo paramPushMetaInfo = container.getMetaInfo();
         if (paramPushMetaInfo == null) {
             return null;
@@ -1283,7 +1393,8 @@ public class MyMIPushNotificationHelper {
     @Nullable
     private static Intent getFocusRouteIntent(
             Context context, XmPushActionContainer container) {
-        if (context == null || container == null || TextUtils.isEmpty(container.packageName)) {
+        if (context == null || container == null
+                || TextUtils.isEmpty(publishPackageName(container))) {
             return null;
         }
         try {
@@ -1298,7 +1409,7 @@ public class MyMIPushNotificationHelper {
                     continue;
                 }
                 Intent route = findPayloadRoute(
-                        context, container.packageName, new JSONObject(parameter), 0,
+                        context, publishPackageName(container), new JSONObject(parameter), 0,
                         new int[]{0});
                 if (route != null) {
                     return route;
@@ -1333,19 +1444,19 @@ public class MyMIPushNotificationHelper {
             }
             int[] nodeCount = new int[]{0};
             if (payload.startsWith("{")) {
-                return findPayloadRoute(context, container.packageName,
+                return findPayloadRoute(context, publishPackageName(container),
                         new JSONObject(payload), 0, nodeCount);
             }
             if (payload.startsWith("[")) {
-                return findPayloadRoute(context, container.packageName,
+                return findPayloadRoute(context, publishPackageName(container),
                         new JSONArray(payload), 0, nodeCount);
             }
-            return resolvePayloadRoute(context, container.packageName, payload);
+            return resolvePayloadRoute(context, publishPackageName(container), payload);
         } catch (Throwable error) {
             // Missing registration secrets, malformed app payloads, and old
             // protocol variants must fall back to notify_effect/Launcher.
             logger.d("Unable to decode a notification payload route for "
-                    + container.packageName);
+                    + publishPackageName(container));
             return null;
         }
     }
@@ -1494,8 +1605,9 @@ public class MyMIPushNotificationHelper {
             localIntent = new Intent();
             localIntent.setComponent(new ComponentName("com.xiaomi.xmsf", "com.xiaomi.mipush.sdk.PushMessageHandler"));
         } else {
+            String targetPackage = publishPackageName(paramXmPushActionContainer);
             localIntent = new Intent(PushConstants.MIPUSH_ACTION_NEW_MESSAGE);
-            localIntent.setComponent(new ComponentName(paramXmPushActionContainer.packageName, "com.xiaomi.mipush.sdk.PushMessageHandler"));
+            localIntent.setComponent(new ComponentName(targetPackage, "com.xiaomi.mipush.sdk.PushMessageHandler"));
         }
         localIntent.putExtra(PushConstants.MIPUSH_EXTRA_PAYLOAD, paramArrayOfByte);
         localIntent.putExtra(FROM_NOTIFICATION, true);

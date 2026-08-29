@@ -38,6 +38,7 @@ import com.nihility.Global;
 import com.nihility.XMPushUtils;
 import com.nihility.notification.NotificationManagerEx;
 import com.xiaomi.push.service.MyNotificationIconHelper;
+import com.xiaomi.push.service.MyMIPushNotificationHelper;
 import com.xiaomi.xmpush.thrift.PushMetaInfo;
 import com.xiaomi.xmpush.thrift.XmPushActionContainer;
 import com.xiaomi.xmsf.R;
@@ -1062,12 +1063,13 @@ public class NotificationController {
 
     public static void cancel(Context context, XmPushActionContainer container,
                               int notificationId, String notificationGroup, boolean clearGroup) {
-        getNotificationManagerEx().cancel(container.getPackageName(),
+        String packageName = MyMIPushNotificationHelper.getNotificationTargetPackage(container);
+        getNotificationManagerEx().cancel(packageName,
                 getNotificationTag(container), notificationId);
 
         if (clearGroup) {
             if (notificationGroup != null) {
-                getNotificationManagerEx().cancel(container.getPackageName(),
+                getNotificationManagerEx().cancel(packageName,
                         getNotificationTag(container), notificationGroup.hashCode());
             }
             return;
@@ -1077,11 +1079,11 @@ public class NotificationController {
             if (notificationGroup != null) {
                 XmPushActionContainer copy = container.deepCopy();
                 try {
-                    Configurations.getInstance().handle(container.packageName, copy);
+                    Configurations.getInstance().handle(packageName, copy);
                 } catch (Throwable e) {
                     e.printStackTrace();
                 }
-                updateSummaryNotification(context, copy.metaInfo, container.getPackageName(), notificationGroup);
+                updateSummaryNotification(context, copy.metaInfo, packageName, notificationGroup);
             }
         }
     }

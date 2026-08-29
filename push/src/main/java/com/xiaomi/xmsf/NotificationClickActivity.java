@@ -19,6 +19,7 @@ import androidx.annotation.Nullable;
 
 import com.xiaomi.push.sdk.MyPushMessageHandler;
 import com.xiaomi.push.sdk.TargetSdkClickDispatcher;
+import com.xiaomi.push.service.MyMIPushNotificationHelper;
 import com.xiaomi.push.service.PushConstants;
 import com.xiaomi.xmpush.thrift.XmPushActionContainer;
 
@@ -345,13 +346,15 @@ public final class NotificationClickActivity extends Activity {
             @Nullable XmPushActionContainer container,
             @Nullable Intent targetIntent) {
         String trustedPackage = clickIntent.getStringExtra(EXTRA_TARGET_PACKAGE);
-        if (container != null && container.getPackageName() != null) {
+        String targetPackage = MyMIPushNotificationHelper
+                .getNotificationTargetPackage(container);
+        if (container != null && targetPackage != null && !targetPackage.isEmpty()) {
             if (trustedPackage != null && !trustedPackage.isEmpty()
-                    && !trustedPackage.equals(container.getPackageName())) {
+                    && !trustedPackage.equals(targetPackage)) {
                 Log.w(TAG, "target package marker does not match payload");
                 return null;
             }
-            return container.getPackageName();
+            return targetPackage;
         }
         if (trustedPackage != null && !trustedPackage.isEmpty()) {
             return trustedPackage;
@@ -379,8 +382,12 @@ public final class NotificationClickActivity extends Activity {
         Intent launch = targetActivityPrivate
                 ? resolveExportedFallback(targetIntent, container)
                 : (targetIntent == null ? null : new Intent(targetIntent));
-        if (launch == null && container != null && container.getPackageName() != null) {
-            launch = getPackageManager().getLaunchIntentForPackage(container.getPackageName());
+        if (launch == null && container != null) {
+            String targetPackage = MyMIPushNotificationHelper
+                    .getNotificationTargetPackage(container);
+            if (targetPackage != null && !targetPackage.isEmpty()) {
+                launch = getPackageManager().getLaunchIntentForPackage(targetPackage);
+            }
         }
         if (launch == null) {
             return;
@@ -427,9 +434,10 @@ public final class NotificationClickActivity extends Activity {
             return null;
         }
 
-        String targetPackage = container == null ? null : container.getPackageName();
+        String targetPackage = MyMIPushNotificationHelper
+                .getNotificationTargetPackage(container);
         ComponentName explicit = targetIntent.getComponent();
-        if (targetPackage == null && explicit != null) {
+        if ((targetPackage == null || targetPackage.isEmpty()) && explicit != null) {
             targetPackage = explicit.getPackageName();
         }
 

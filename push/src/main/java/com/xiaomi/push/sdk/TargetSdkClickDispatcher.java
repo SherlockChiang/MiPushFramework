@@ -109,7 +109,8 @@ public final class TargetSdkClickDispatcher {
     public static DispatchResult dispatchReplay(
             Context context, @Nullable XmPushActionContainer replayContainer) {
         if (context == null || replayContainer == null
-                || replayContainer.getPackageName() == null) {
+                || MyMIPushNotificationHelper.getNotificationTargetPackage(replayContainer)
+                .isEmpty()) {
             return DispatchResult.UNAVAILABLE;
         }
         XmPushActionContainer targetContainer =
@@ -133,10 +134,12 @@ public final class TargetSdkClickDispatcher {
             @Nullable XmPushActionContainer container,
             @Nullable byte[] targetPayload) {
         if (context == null || container == null || targetPayload == null
-                || targetPayload.length == 0 || container.getPackageName() == null) {
+                || targetPayload.length == 0
+                || MyMIPushNotificationHelper.getNotificationTargetPackage(container).isEmpty()) {
             return DispatchResult.UNAVAILABLE;
         }
-        String targetPackage = container.getPackageName();
+        String targetPackage = MyMIPushNotificationHelper
+                .getNotificationTargetPackage(container);
         final Capability capability;
         try {
             capability = selectCapability(

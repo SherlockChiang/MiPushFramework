@@ -7,6 +7,7 @@ import static org.junit.Assert.assertTrue;
 
 import com.elvishew.xlog.XLog;
 import com.xiaomi.xmpush.thrift.PushMetaInfo;
+import com.xiaomi.xmpush.thrift.XmPushActionContainer;
 
 import android.content.pm.ActivityInfo;
 import android.content.Intent;
@@ -53,6 +54,48 @@ public class NotificationExecutorTest {
         assertNotNull(thread);
         assertTrue("Thread name must start with mipush-notification-",
                 thread.getName().startsWith("mipush-notification-"));
+    }
+
+    @Test
+    public void notificationDispatchKeyUsesTheFullPublishedIdentity() {
+        MyMIPushNotificationHelper.NotificationKey key =
+                new MyMIPushNotificationHelper.NotificationKey(
+                        "com.example.client", "mipush_com.example.client", 42);
+        MyMIPushNotificationHelper.NotificationKey same =
+                new MyMIPushNotificationHelper.NotificationKey(
+                        "com.example.client", "mipush_com.example.client", 42);
+
+        assertEquals(key, same);
+        assertEquals(key.hashCode(), same.hashCode());
+        assertTrue(!key.equals(new MyMIPushNotificationHelper.NotificationKey(
+                "com.example.other", "mipush_com.example.client", 42)));
+        assertTrue(!key.equals(new MyMIPushNotificationHelper.NotificationKey(
+                "com.example.client", "other-tag", 42)));
+        assertTrue(!key.equals(new MyMIPushNotificationHelper.NotificationKey(
+                "com.example.client", "mipush_com.example.client", 43)));
+    }
+
+    @Test
+    public void notificationTargetPackageUsesMiuiWrapperTarget() {
+        XmPushActionContainer container = new XmPushActionContainer();
+        container.packageName = "com.xiaomi.xmsf";
+        PushMetaInfo metaInfo = new PushMetaInfo();
+        metaInfo.extra = new HashMap<>();
+        metaInfo.extra.put("miui_package_name", "com.example.client");
+        container.metaInfo = metaInfo;
+
+        assertEquals("com.example.client",
+                MyMIPushNotificationHelper.getNotificationTargetPackage(container));
+    }
+
+    @Test
+    public void notificationTargetPackageFallsBackToContainerPackage() {
+        XmPushActionContainer container = new XmPushActionContainer();
+        container.packageName = "com.example.client";
+
+        assertEquals("com.example.client",
+                MyMIPushNotificationHelper.getNotificationTargetPackage(container));
+        assertEquals("", MyMIPushNotificationHelper.getNotificationTargetPackage(null));
     }
 
     @Test

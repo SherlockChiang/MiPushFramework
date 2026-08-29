@@ -95,8 +95,9 @@ public class MyPushMessageHandler extends IntentService {
     public static void cancelNotification(Context context, Bundle bundle, XmPushActionContainer container) {
         int notificationId = bundle.getInt(Constants.INTENT_NOTIFICATION_ID, 0);
         String notificationGroup = bundle.getString(Constants.INTENT_NOTIFICATION_GROUP);
+        String targetPackage = MyMIPushNotificationHelper.getNotificationTargetPackage(container);
         try {
-            Configurations.getInstance().handle(container.packageName, container);
+            Configurations.getInstance().handle(targetPackage, container);
         } catch (Exception e) {
             logger.e("cancelNotification", e);
         }
@@ -116,7 +117,7 @@ public class MyPushMessageHandler extends IntentService {
             return;
         }
 
-        String targetPackage = container.getPackageName();
+        String targetPackage = MyMIPushNotificationHelper.getNotificationTargetPackage(container);
 
         activeApp(context, targetPackage);
         pullUpApp(context, targetPackage, container);
@@ -131,7 +132,7 @@ public class MyPushMessageHandler extends IntentService {
     public static ComponentName forwardToTargetApplication(Context context, byte[] payload) {
         XmPushActionContainer container = XMPushUtils.packToContainer(payload);
         PushMetaInfo metaInfo = container.getMetaInfo();
-        String targetPackage = container.getPackageName();
+        String targetPackage = MyMIPushNotificationHelper.getNotificationTargetPackage(container);
 
         final Intent localIntent = new Intent(PushConstants.MIPUSH_ACTION_NEW_MESSAGE);
         localIntent.setComponent(new ComponentName(targetPackage, "com.xiaomi.mipush.sdk.PushMessageHandler"));
@@ -168,7 +169,8 @@ public class MyPushMessageHandler extends IntentService {
     private static Intent getJumpIntent(Context context, XmPushActionContainer container) {
         Intent intent = MyMIPushNotificationHelper.getSdkIntent(context, container);
         if (intent == null) {
-            intent = getJumpIntentFromPkg(context, container.packageName);
+            intent = getJumpIntentFromPkg(
+                    context, MyMIPushNotificationHelper.getNotificationTargetPackage(container));
         }
         return intent;
     }
