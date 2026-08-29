@@ -178,6 +178,9 @@ public class NotificationController {
         notificationBuilder.setPriority(Notification.PRIORITY_HIGH);
 
         boolean attemptFocus = shouldAttachFocusExtras(context, metaInfo);
+        if (!attemptFocus) {
+            applyPortableFocusPresentation(metaInfo, notificationBuilder);
+        }
         if (attemptFocus) {
             // The official group supplied by the client always wins. Debug and
             // other direct callers otherwise get a stable focus-only group so a
@@ -211,12 +214,45 @@ public class NotificationController {
                                     focusFailure);
                         }
                         stripFocusNotificationExtras(notificationBuilder);
+                        if (focusFailure != null) {
+                            applyPortableFocusPresentation(metaInfo, notificationBuilder);
+                        }
                     }
                     return notify(context, deliveryId, deliveryPackage, deliveryTag,
                             notificationBuilder, metaInfo, true, includeFocusExtras);
                 });
 
         updateSummaryNotification(context, metaInfo, packageName, notification.getGroup());
+    }
+
+    /**
+     * Represent Xiaomi progress metadata with public Android APIs when the
+     * active SystemUI cannot render {@code miui.focus.*}. This is deliberately
+     * limited to progress and update alert behavior: protocol timeout and
+     * updatable fields do not imply an ongoing or automatically expiring
+     * Android notification.
+     */
+    private static void applyPortableFocusPresentation(
+            PushMetaInfo metaInfo, NotificationCompat.Builder builder) {
+        if (metaInfo == null || builder == null) {
+            return;
+        }
+        try {
+            String parameter = XMPushUtils.getConfiguration(metaInfo).focusParam(null);
+            FocusNotificationSafety.PortableFocusData focus =
+                    FocusNotificationSafety.parsePortableFocusData(parameter);
+            if (focus.hasProgress()) {
+                builder.setProgress(FocusNotificationSafety.PORTABLE_PROGRESS_MAX,
+                        focus.progress(), false);
+            }
+            if (focus.updatable()) {
+                builder.setOnlyAlertOnce(true);
+            }
+        } catch (Throwable error) {
+            // The portable enhancement is optional; standard delivery remains
+            // authoritative for malformed or unsupported focus payloads.
+            logger.w("Unable to apply portable focus presentation", error);
+        }
     }
 
     private static boolean hasNoExplicitChannel(NotificationCompat.Builder builder) {

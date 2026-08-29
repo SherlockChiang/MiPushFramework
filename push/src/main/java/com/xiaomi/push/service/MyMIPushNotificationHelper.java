@@ -226,9 +226,11 @@ public class MyMIPushNotificationHelper {
      */
     public static void notifyPushMessage(Context context, byte[] decryptedContent) {
         XmPushActionContainer container = XMPushUtils.packToContainer(decryptedContent);
-        AppInfoUtils.AppNotificationOp notificationOp = AppInfoUtils.getAppNotificationOp(context, getTargetPackage(container), true);
+        String targetPackage = publishPackageName(container);
+        AppInfoUtils.AppNotificationOp notificationOp =
+                AppInfoUtils.getAppNotificationOp(context, targetPackage, true);
         if (notificationOp == AppInfoUtils.AppNotificationOp.NOT_ALLOWED) {
-            logger.w("Do not notify because user block " + getTargetPackage(container) + "'s notification");
+            logger.w("Do not notify because user block " + targetPackage + "'s notification");
         } else {
             loadConfigurationsOnce(context);
             // The SDK uses the wrapper package for some system-delivered
@@ -289,15 +291,26 @@ public class MyMIPushNotificationHelper {
         if (container == null) {
             return "";
         }
+        // System-wrapper messages carry the real client in this public MiPush
+        // field. Read it before the SDK helper so a hook/aspect failure cannot
+        // misattribute the notification to com.xiaomi.xmsf.
+        if ("com.xiaomi.xmsf".equals(container.getPackageName())
+                && container.getMetaInfo() != null
+                && container.getMetaInfo().getExtra() != null) {
+            String wrappedTarget = container.getMetaInfo().getExtra().get("miui_package_name");
+            if (wrappedTarget != null && !wrappedTarget.trim().isEmpty()) {
+                return wrappedTarget.trim();
+            }
+        }
         try {
             String targetPackage = getTargetPackage(container);
-            if (!TextUtils.isEmpty(targetPackage)) {
+            if (targetPackage != null && !targetPackage.isEmpty()) {
                 return targetPackage;
             }
         } catch (Throwable error) {
             logger.w("Unable to derive notification publish package", error);
         }
-        if (!TextUtils.isEmpty(container.getPackageName())) {
+        if (container.getPackageName() != null && !container.getPackageName().isEmpty()) {
             return container.getPackageName();
         }
         return "";
@@ -767,7 +780,7 @@ public class MyMIPushNotificationHelper {
     public static int getNotificationId(XmPushActionContainer container) {
         final PushMetaInfo metaInfo = container.getMetaInfo();
         String id = metaInfo.isSetNotifyId() ? String.valueOf(metaInfo.getNotifyId()) : metaInfo.getId();
-        String idWithPackage = getTargetPackage(container) + "_" + id;
+        String idWithPackage = publishPackageName(container) + "_" + id;
         return idWithPackage.hashCode();
     }
 

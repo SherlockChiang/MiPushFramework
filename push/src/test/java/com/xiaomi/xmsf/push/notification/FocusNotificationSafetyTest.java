@@ -3,6 +3,7 @@ package com.xiaomi.xmsf.push.notification;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -90,6 +91,108 @@ public class FocusNotificationSafetyTest {
                 "{\"business\":\"tsmclient\",\"param_island\":{}}"));
         assertFalse(FocusNotificationSafety.isWellFormedParameter("\"not-an-object\""));
         assertFalse(FocusNotificationSafety.isWellFormedParameter("[]"));
+    }
+
+    @Test
+    public void parsesObservedDeliveryProgressWithoutApplicationSpecificRules() {
+        int[] observedProgress = {0, 10, 35, 50, 75, 100};
+        for (int progress : observedProgress) {
+            FocusNotificationSafety.PortableFocusData result =
+                    FocusNotificationSafety.parsePortableFocusData(
+                            "{\"business\":\"food_delivery\",\"progress\":"
+                                    + progress + ",\"updatable\":true}");
+
+            assertTrue(result.hasProgress());
+            assertEquals(progress, result.progress());
+            assertTrue(result.updatable());
+        }
+    }
+
+    @Test
+    public void parsesNestedProgressAndReadableDeliveryFields() {
+        FocusNotificationSafety.PortableFocusData result =
+                FocusNotificationSafety.parsePortableFocusData(
+                        "{\"title\":\"Arrives at 20:12\","
+                                + "\"content\":\"Courier is delivering\","
+                                + "\"url\":\"https://example.test/order/42\","
+                                + "\"sequence\":1787400588773,"
+                                + "\"progressCount\":2,"
+                                + "\"param_v2\":{\"progressInfo\":{\"progress\":75}}}");
+
+        assertEquals("Arrives at 20:12", result.title());
+        assertEquals("Courier is delivering", result.body());
+        assertEquals("https://example.test/order/42", result.url());
+        assertEquals("1787400588773", result.sequence());
+        assertEquals(2, result.progressCount());
+        assertEquals(75, result.progress());
+    }
+
+    @Test
+    public void nestedBaseInfoFillsMissingPortableText() {
+        FocusNotificationSafety.PortableFocusData result =
+                FocusNotificationSafety.parsePortableFocusData(
+                        "{\"param_v2\":{\"baseInfo\":{"
+                                + "\"title\":\"Order accepted\","
+                                + "\"content\":\"Preparing food\"}}}");
+
+        assertEquals("Order accepted", result.title());
+        assertEquals("Preparing food", result.body());
+    }
+
+    @Test
+    public void paramV2AodTitleIsLastReadableTitleFallback() {
+        FocusNotificationSafety.PortableFocusData result =
+                FocusNotificationSafety.parsePortableFocusData(
+                        "{\"param_v2\":{\"aodTitle\":\"Delivered\"}}");
+
+        assertEquals("Delivered", result.title());
+    }
+
+    @Test
+    public void invalidProgressFallsBackOrClampsSafely() {
+        FocusNotificationSafety.PortableFocusData nestedFallback =
+                FocusNotificationSafety.parsePortableFocusData(
+                        "{\"progress\":-1,\"param_v2\":{"
+                                + "\"progressInfo\":{\"progress\":35}}}");
+        assertEquals(35, nestedFallback.progress());
+
+        FocusNotificationSafety.PortableFocusData clamped =
+                FocusNotificationSafety.parsePortableFocusData(
+                        "{\"progress\":1000}");
+        assertEquals(100, clamped.progress());
+
+        FocusNotificationSafety.PortableFocusData missing =
+                FocusNotificationSafety.parsePortableFocusData(
+                        "{\"progress\":-5}");
+        assertFalse(missing.hasProgress());
+    }
+
+    @Test
+    public void malformedAndOversizedPortableDataIsEmpty() {
+        FocusNotificationSafety.PortableFocusData malformed =
+                FocusNotificationSafety.parsePortableFocusData("not-json");
+        assertFalse(malformed.hasProgress());
+        assertNull(malformed.title());
+        assertNull(malformed.body());
+        assertNull(malformed.url());
+
+        FocusNotificationSafety.PortableFocusData oversized =
+                FocusNotificationSafety.parsePortableFocusData(
+                        "{\"content\":\"" + "x".repeat(4_000) + "\"}");
+        assertFalse(oversized.hasProgress());
+        assertNull(oversized.body());
+    }
+
+    @Test
+    public void contentAliasIsUsedForReadableFallbackBody() {
+        FocusNotificationSafety.ResolvedContent result =
+                FocusNotificationSafety.resolveReadableContent(
+                        null, null,
+                        "{\"title\":\"Delivery\",\"content\":\"On the way\"}",
+                        "App", "New notification");
+
+        assertEquals("Delivery", result.title());
+        assertEquals("On the way", result.body());
     }
 
     @Test

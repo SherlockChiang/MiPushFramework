@@ -24,9 +24,12 @@ public final class FocusNotificationSafety {
     public static final String FOCUS_APP_ICON_PICTURE = "miui.focus.pic_app_icon";
     public static final int MAX_PARAMETER_BYTES = 3_072;
     public static final long IMAGE_ENRICHMENT_BUDGET_MILLIS = 700L;
+    public static final int PORTABLE_PROGRESS_MAX = 100;
 
     private static final int MAX_FALLBACK_TITLE_CODE_POINTS = 160;
     private static final int MAX_FALLBACK_BODY_CODE_POINTS = 1_024;
+    private static final int MAX_FALLBACK_URL_CODE_POINTS = 2_048;
+    private static final int MAX_SEQUENCE_CODE_POINTS = 128;
     private static final String DEFAULT_TITLE = "MiPush notification";
     private static final String DEFAULT_BODY = "New notification";
     private static final String FOCUS_GROUP_MARKER = "#focus#";
@@ -44,37 +47,98 @@ public final class FocusNotificationSafety {
             String focusParameter,
             String fallbackTitle,
             String fallbackBody) {
-        String focusTitle = null;
-        String focusTicker = null;
-        String focusBody = null;
-        if (isParameterWithinLimit(focusParameter)) {
-            try {
-                JsonElement root = JsonParser.parseString(focusParameter);
-                if (root.isJsonObject()) {
-                    JsonObject object = root.getAsJsonObject();
-                    focusTitle = boundedString(object, "title",
-                            MAX_FALLBACK_TITLE_CODE_POINTS);
-                    focusTicker = boundedString(object, "ticker",
-                            MAX_FALLBACK_TITLE_CODE_POINTS);
-                    focusBody = boundedString(object, "description",
-                            MAX_FALLBACK_BODY_CODE_POINTS);
-                }
-            } catch (Throwable ignored) {
-                // The ordinary notification remains authoritative.
-            }
-        }
+        PortableFocusData portable = parsePortableFocusData(focusParameter);
 
         String resolvedTitle = hasText(title)
                 ? title
-                : firstText(focusTitle, focusTicker, focusBody,
+                : firstText(portable.title(), portable.body(),
                 sanitizeFallback(fallbackTitle, MAX_FALLBACK_TITLE_CODE_POINTS),
                 DEFAULT_TITLE);
         String resolvedBody = hasText(body)
                 ? body
-                : firstText(focusBody, focusTitle, focusTicker,
+                : firstText(portable.body(), portable.title(),
                 sanitizeFallback(fallbackBody, MAX_FALLBACK_BODY_CODE_POINTS),
                 DEFAULT_BODY);
         return new ResolvedContent(resolvedTitle, resolvedBody);
+    }
+
+    /**
+     * Parse the public scalar fields that have a direct, safe Android fallback.
+     * The original JSON remains untouched for Xiaomi SystemUI, including all
+     * unknown fields and picture aliases. Invalid input produces an empty value
+     * so optional focus metadata can never suppress the ordinary notification.
+     */
+    public static PortableFocusData parsePortableFocusData(String focusParameter) {
+        if (!isParameterWithinLimit(focusParameter)) {
+            return PortableFocusData.EMPTY;
+        }
+        try {
+            JsonElement parsed = JsonParser.parseString(focusParameter);
+            if (parsed == null || !parsed.isJsonObject()) {
+                return PortableFocusData.EMPTY;
+            }
+
+            JsonObject root = parsed.getAsJsonObject();
+            JsonObject paramV2 = object(root, "param_v2");
+            JsonObject baseInfo = object(paramV2, "baseInfo");
+            JsonObject progressInfo = object(paramV2, "progressInfo");
+
+            String title = firstString(root, MAX_FALLBACK_TITLE_CODE_POINTS,
+                    "title", "ticker");
+            if (!hasText(title)) {
+                title = firstString(baseInfo, MAX_FALLBACK_TITLE_CODE_POINTS,
+                        "title");
+            }
+            if (!hasText(title)) {
+                title = firstString(paramV2, MAX_FALLBACK_TITLE_CODE_POINTS,
+                        "aodTitle");
+            }
+
+            String body = firstString(root, MAX_FALLBACK_BODY_CODE_POINTS,
+                    "content", "description");
+            if (!hasText(body)) {
+                body = firstString(baseInfo, MAX_FALLBACK_BODY_CODE_POINTS,
+                        "content", "description", "subContent");
+            }
+
+            String url = firstString(root, MAX_FALLBACK_URL_CODE_POINTS,
+                    "url", "intent_uri", "web_uri");
+            if (!hasText(url)) {
+                url = firstString(paramV2, MAX_FALLBACK_URL_CODE_POINTS,
+                        "url", "intent_uri", "web_uri");
+            }
+
+            int progress = firstNonNegativeInt(root, PORTABLE_PROGRESS_MAX,
+                    "progress");
+            if (progress < 0) {
+                progress = firstNonNegativeInt(progressInfo, PORTABLE_PROGRESS_MAX,
+                        "progress");
+            }
+
+            int progressCount = firstNonNegativeInt(root, PORTABLE_PROGRESS_MAX,
+                    "progressCount");
+            if (progressCount < 0) {
+                progressCount = firstNonNegativeInt(paramV2, PORTABLE_PROGRESS_MAX,
+                        "progressCount");
+            }
+
+            Boolean updatable = firstBoolean(root, "updatable");
+            if (updatable == null) {
+                updatable = firstBoolean(paramV2, "updatable");
+            }
+
+            String sequence = firstScalarString(root, MAX_SEQUENCE_CODE_POINTS,
+                    "sequence");
+            if (!hasText(sequence)) {
+                sequence = firstScalarString(paramV2, MAX_SEQUENCE_CODE_POINTS,
+                        "sequence");
+            }
+
+            return new PortableFocusData(title, body, url, sequence, progress,
+                    progressCount, Boolean.TRUE.equals(updatable));
+        } catch (Throwable ignored) {
+            return PortableFocusData.EMPTY;
+        }
     }
 
     public static boolean isParameterWithinLimit(String parameter) {
@@ -238,12 +302,105 @@ public final class FocusNotificationSafety {
     }
 
     private static String boundedString(JsonObject object, String name, int maxCodePoints) {
+        if (object == null) {
+            return null;
+        }
         JsonElement value = object.get(name);
         if (value == null || !value.isJsonPrimitive()
                 || !value.getAsJsonPrimitive().isString()) {
             return null;
         }
         return sanitizeFallback(value.getAsString(), maxCodePoints);
+    }
+
+    private static JsonObject object(JsonObject parent, String name) {
+        if (parent == null || name == null) {
+            return null;
+        }
+        JsonElement value = parent.get(name);
+        return value != null && value.isJsonObject() ? value.getAsJsonObject() : null;
+    }
+
+    private static String firstString(
+            JsonObject object, int maxCodePoints, String... names) {
+        if (object == null || names == null) {
+            return null;
+        }
+        for (String name : names) {
+            String value = boundedString(object, name, maxCodePoints);
+            if (hasText(value)) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private static String firstScalarString(
+            JsonObject object, int maxCodePoints, String... names) {
+        if (object == null || names == null) {
+            return null;
+        }
+        for (String name : names) {
+            JsonElement value = object.get(name);
+            if (value == null || !value.isJsonPrimitive()) {
+                continue;
+            }
+            try {
+                String result = sanitizeFallback(value.getAsString(), maxCodePoints);
+                if (hasText(result)) {
+                    return result;
+                }
+            } catch (Throwable ignored) {
+                // Try the next documented alias.
+            }
+        }
+        return null;
+    }
+
+    private static int firstNonNegativeInt(
+            JsonObject object, int maximum, String... names) {
+        if (object == null || names == null) {
+            return -1;
+        }
+        for (String name : names) {
+            JsonElement value = object.get(name);
+            if (value == null || !value.isJsonPrimitive()) {
+                continue;
+            }
+            try {
+                int parsed = value.getAsInt();
+                if (parsed >= 0) {
+                    return Math.min(maximum, parsed);
+                }
+            } catch (Throwable ignored) {
+                // Try the next documented alias.
+            }
+        }
+        return -1;
+    }
+
+    private static Boolean firstBoolean(JsonObject object, String... names) {
+        if (object == null || names == null) {
+            return null;
+        }
+        for (String name : names) {
+            JsonElement value = object.get(name);
+            if (value == null || !value.isJsonPrimitive()) {
+                continue;
+            }
+            try {
+                String raw = value.getAsString();
+                if ("true".equalsIgnoreCase(raw)) {
+                    return Boolean.TRUE;
+                }
+                if ("false".equalsIgnoreCase(raw)) {
+                    return Boolean.FALSE;
+                }
+            } catch (Throwable ignored) {
+                // Try the next documented alias.
+            }
+        }
+        return null;
     }
 
     private static String sanitizeFallback(String value, int maxCodePoints) {
@@ -305,6 +462,68 @@ public final class FocusNotificationSafety {
 
         public String body() {
             return body;
+        }
+    }
+
+    public static final class PortableFocusData {
+        private static final PortableFocusData EMPTY = new PortableFocusData(
+                null, null, null, null, -1, -1, false);
+
+        private final String title;
+        private final String body;
+        private final String url;
+        private final String sequence;
+        private final int progress;
+        private final int progressCount;
+        private final boolean updatable;
+
+        private PortableFocusData(
+                String title,
+                String body,
+                String url,
+                String sequence,
+                int progress,
+                int progressCount,
+                boolean updatable) {
+            this.title = title;
+            this.body = body;
+            this.url = url;
+            this.sequence = sequence;
+            this.progress = progress;
+            this.progressCount = progressCount;
+            this.updatable = updatable;
+        }
+
+        public String title() {
+            return title;
+        }
+
+        public String body() {
+            return body;
+        }
+
+        public String url() {
+            return url;
+        }
+
+        public String sequence() {
+            return sequence;
+        }
+
+        public int progress() {
+            return progress;
+        }
+
+        public int progressCount() {
+            return progressCount;
+        }
+
+        public boolean updatable() {
+            return updatable;
+        }
+
+        public boolean hasProgress() {
+            return progress >= 0;
         }
     }
 }
