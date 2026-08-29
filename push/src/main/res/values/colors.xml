@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="notification_focus_primary">#FF1D1B20</color>
+    <color name="notification_focus_secondary">#991D1B20</color>
+    <color name="notification_focus_accent">#FF6200</color>
+    <color name="notification_focus_track">#33000000</color>
+    <color name="notification_focus_inactive">#66000000</color>
+</resources>

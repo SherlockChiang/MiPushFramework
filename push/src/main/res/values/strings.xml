@@ -190,6 +190,13 @@ Please grant the <b>Run in the background or wake up</b> permissions.
     <string name="event_replay_unsupported">Only notification records can be shown again.</string>
     <string name="event_replay_failed">Could not replay this notification.</string>
 
+    <string name="notification_focus_channel_name">Focus updates</string>
+    <string name="notification_focus_channel_description">Floating progress updates</string>
+    <string name="notification_focus_stage_merchant">Merchant accepted</string>
+    <string name="notification_focus_stage_courier">Courier delivering</string>
+    <string name="notification_focus_stage_delivered">Delivered</string>
+    <string name="notification_focus_stage_waiting">Waiting for acceptance</string>
+
     <!-- Permission -->
     <string name="permissions">Permissions</string>
     <string name="permission_allow_receive">Receive notification message</string>

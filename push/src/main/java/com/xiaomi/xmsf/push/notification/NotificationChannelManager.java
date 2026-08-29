@@ -25,6 +25,7 @@ import com.nihility.Global;
 import com.nihility.XMPushUtils;
 import com.nihility.notification.NotificationManagerEx;
 import com.xiaomi.xmpush.thrift.PushMetaInfo;
+import com.xiaomi.xmsf.R;
 
 import java.util.Arrays;
 
@@ -34,6 +35,10 @@ public class NotificationChannelManager {
 
     /** Dedicated channel for the settings-page replay actions. */
     public static final String DEBUG_CHANNEL_ID = "mipush_debug_test_v2";
+    /** Channel suffix for portable focus notifications that should heads-up. */
+    private static final String PORTABLE_FOCUS_CHANNEL_SUFFIX = "_mipush_focus_v1";
+    static final int PORTABLE_FOCUS_CHANNEL_IMPORTANCE =
+            NotificationManager.IMPORTANCE_HIGH;
 
     public static NotificationManagerEx getNotificationManagerEx() {
         return NotificationManagerEx.INSTANCE;
@@ -135,6 +140,70 @@ public class NotificationChannelManager {
         channel.enableLights(true);
         getNotificationManagerEx().createNotificationChannels(
                 packageName, Arrays.asList(channel));
+    }
+
+    /**
+     * Create the user-visible high-importance channel used by the portable
+     * three-stage focus renderer. A dedicated channel keeps ordinary message
+     * channel preferences intact while giving focus updates a heads-up-capable
+     * default on AOSP and other non-Xiaomi SystemUI implementations.
+     */
+    @Nullable
+    public static NotificationChannel ensurePortableFocusChannel(
+            Context context, String packageName) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O
+                || context == null
+                || TextUtils.isEmpty(packageName)) {
+            return null;
+        }
+
+        try {
+            String channelId = getPortableFocusChannelId(packageName);
+            NotificationChannel existing =
+                    getNotificationManagerEx().getNotificationChannel(packageName, channelId);
+            if (existing != null) {
+                return existing;
+            }
+
+            CharSequence appName = null;
+            try {
+                appName = Global.ApplicationNameCache().getAppName(context, packageName);
+            } catch (Throwable ignored) {
+            }
+            if (TextUtils.isEmpty(appName)) {
+                appName = packageName;
+            }
+
+            NotificationChannel channel = new NotificationChannel(
+                    channelId,
+                    context.getString(R.string.notification_focus_channel_name),
+                    PORTABLE_FOCUS_CHANNEL_IMPORTANCE);
+            channel.setDescription(
+                    context.getString(R.string.notification_focus_channel_description));
+            channel.enableVibration(true);
+            channel.enableLights(true);
+
+            try {
+                NotificationChannelGroup group = createGroupWithPackage(packageName, appName);
+                getNotificationManagerEx().createNotificationChannelGroups(
+                        packageName, Arrays.asList(group));
+                channel.setGroup(group.getId());
+            } catch (Throwable ignored) {
+                // A group is cosmetic. Channel creation remains authoritative.
+            }
+
+            getNotificationManagerEx().createNotificationChannels(
+                    packageName, Arrays.asList(channel));
+            return getNotificationManagerEx().getNotificationChannel(packageName, channelId);
+        } catch (Throwable ignored) {
+            // The caller preserves its original channel when package-attributed
+            // channel creation is unavailable on this ROM.
+            return null;
+        }
+    }
+
+    public static String getPortableFocusChannelId(String packageName) {
+        return getChannelIdByPkg(packageName) + PORTABLE_FOCUS_CHANNEL_SUFFIX;
     }
 
     private static NotificationChannel createNotificationChannel(PushMetaInfo metaInfo, String packageName, CharSequence appName) {

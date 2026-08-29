@@ -128,6 +128,62 @@ public class FocusNotificationSafetyTest {
     }
 
     @Test
+    public void mapsObservedDeliveryProgressToThreePortableStages() {
+        FocusNotificationSafety.PortableFocusData waiting =
+                FocusNotificationSafety.parsePortableFocusData("{\"progress\":0}");
+        assertEquals(-1, waiting.stageIndex());
+        assertEquals(0, waiting.timelineProgress());
+
+        int[] merchant = {10, 35, 50, 74};
+        for (int progress : merchant) {
+            FocusNotificationSafety.PortableFocusData result =
+                    FocusNotificationSafety.parsePortableFocusData(
+                            "{\"progress\":" + progress + "}");
+            assertEquals(0, result.stageIndex());
+            assertEquals(0, result.timelineProgress());
+        }
+
+        FocusNotificationSafety.PortableFocusData courier =
+                FocusNotificationSafety.parsePortableFocusData("{\"progress\":75}");
+        assertEquals(1, courier.stageIndex());
+        assertEquals(50, courier.timelineProgress());
+
+        FocusNotificationSafety.PortableFocusData delivered =
+                FocusNotificationSafety.parsePortableFocusData("{\"progress\":100}");
+        assertEquals(2, delivered.stageIndex());
+        assertEquals(100, delivered.timelineProgress());
+    }
+
+    @Test
+    public void gatesPortableTimelineByFoodDeliveryScene() {
+        FocusNotificationSafety.PortableFocusData scene =
+                FocusNotificationSafety.parsePortableFocusData(
+                        "{\"scene\":\"foodDelivery\",\"progress\":75}");
+        assertTrue(scene.isFoodDeliveryTimeline());
+
+        FocusNotificationSafety.PortableFocusData businessAlias =
+                FocusNotificationSafety.parsePortableFocusData(
+                        "{\"business\":\"food_delivery\",\"progress\":75}");
+        assertTrue(businessAlias.isFoodDeliveryTimeline());
+
+        FocusNotificationSafety.PortableFocusData unrelated =
+                FocusNotificationSafety.parsePortableFocusData(
+                        "{\"scene\":\"rideHailing\",\"business\":\"food_delivery\","
+                                + "\"progress\":75}");
+        assertFalse(unrelated.isFoodDeliveryTimeline());
+    }
+
+    @Test
+    public void readsPortableAccentFromObservedProgressInfo() {
+        FocusNotificationSafety.PortableFocusData result =
+                FocusNotificationSafety.parsePortableFocusData(
+                        "{\"param_v2\":{\"progressInfo\":{"
+                                + "\"progress\":75,\"colorProgress\":\"#FF6200\"}}}");
+
+        assertEquals("#FF6200", result.accentColor());
+    }
+
+    @Test
     public void nestedBaseInfoFillsMissingPortableText() {
         FocusNotificationSafety.PortableFocusData result =
                 FocusNotificationSafety.parsePortableFocusData(

@@ -25,11 +25,20 @@ public final class FocusNotificationSafety {
     public static final int MAX_PARAMETER_BYTES = 3_072;
     public static final long IMAGE_ENRICHMENT_BUDGET_MILLIS = 700L;
     public static final int PORTABLE_PROGRESS_MAX = 100;
+    /** First observed progress value after a delivery merchant accepts an order. */
+    public static final int PORTABLE_MERCHANT_STAGE_PROGRESS = 10;
+    /** First observed progress value after the courier starts the delivery leg. */
+    public static final int PORTABLE_COURIER_STAGE_PROGRESS = 75;
+    /** Progress value at which the delivery timeline is complete. */
+    public static final int PORTABLE_DELIVERED_STAGE_PROGRESS = 100;
 
     private static final int MAX_FALLBACK_TITLE_CODE_POINTS = 160;
     private static final int MAX_FALLBACK_BODY_CODE_POINTS = 1_024;
     private static final int MAX_FALLBACK_URL_CODE_POINTS = 2_048;
     private static final int MAX_SEQUENCE_CODE_POINTS = 128;
+    private static final int MAX_SCENE_CODE_POINTS = 64;
+    private static final String FOOD_DELIVERY_SCENE = "foodDelivery";
+    private static final String FOOD_DELIVERY_BUSINESS = "food_delivery";
     private static final String DEFAULT_TITLE = "MiPush notification";
     private static final String DEFAULT_BODY = "New notification";
     private static final String FOCUS_GROUP_MARKER = "#focus#";
@@ -83,6 +92,15 @@ public final class FocusNotificationSafety {
             JsonObject baseInfo = object(paramV2, "baseInfo");
             JsonObject progressInfo = object(paramV2, "progressInfo");
 
+            String scene = firstString(root, MAX_SCENE_CODE_POINTS, "scene");
+            if (!hasText(scene)) {
+                scene = firstString(paramV2, MAX_SCENE_CODE_POINTS, "scene");
+            }
+            String business = firstString(paramV2, MAX_SCENE_CODE_POINTS, "business");
+            if (!hasText(business)) {
+                business = firstString(root, MAX_SCENE_CODE_POINTS, "business");
+            }
+
             String title = firstString(root, MAX_FALLBACK_TITLE_CODE_POINTS,
                     "title", "ticker");
             if (!hasText(title)) {
@@ -134,8 +152,24 @@ public final class FocusNotificationSafety {
                         "sequence");
             }
 
-            return new PortableFocusData(title, body, url, sequence, progress,
-                    progressCount, Boolean.TRUE.equals(updatable));
+            // Xiaomi's delivery templates expose the accent in more than one
+            // documented location. Keep the value as a bounded string here;
+            // the Android notification renderer validates it before use.
+            String accentColor = firstString(progressInfo, 32,
+                    "colorProgress", "colorProgressEnd");
+            if (!hasText(accentColor)) {
+                JsonObject paramIsland = object(paramV2, "param_island");
+                accentColor = firstString(paramIsland, 32, "highlightColor");
+            }
+            if (!hasText(accentColor)) {
+                accentColor = firstString(baseInfo, 32, "colorSubTitle");
+            }
+            if (!hasText(accentColor)) {
+                accentColor = firstString(root, 32, "colorDesc", "colorDescDark");
+            }
+
+            return new PortableFocusData(title, body, url, sequence, scene, business,
+                    progress, progressCount, Boolean.TRUE.equals(updatable), accentColor);
         } catch (Throwable ignored) {
             return PortableFocusData.EMPTY;
         }
@@ -467,31 +501,40 @@ public final class FocusNotificationSafety {
 
     public static final class PortableFocusData {
         private static final PortableFocusData EMPTY = new PortableFocusData(
-                null, null, null, null, -1, -1, false);
+                null, null, null, null, null, null, -1, -1, false, null);
 
         private final String title;
         private final String body;
         private final String url;
         private final String sequence;
+        private final String scene;
+        private final String business;
         private final int progress;
         private final int progressCount;
         private final boolean updatable;
+        private final String accentColor;
 
         private PortableFocusData(
                 String title,
                 String body,
                 String url,
                 String sequence,
+                String scene,
+                String business,
                 int progress,
                 int progressCount,
-                boolean updatable) {
+                boolean updatable,
+                String accentColor) {
             this.title = title;
             this.body = body;
             this.url = url;
             this.sequence = sequence;
+            this.scene = scene;
+            this.business = business;
             this.progress = progress;
             this.progressCount = progressCount;
             this.updatable = updatable;
+            this.accentColor = accentColor;
         }
 
         public String title() {
@@ -510,6 +553,14 @@ public final class FocusNotificationSafety {
             return sequence;
         }
 
+        public String scene() {
+            return scene;
+        }
+
+        public String business() {
+            return business;
+        }
+
         public int progress() {
             return progress;
         }
@@ -522,8 +573,42 @@ public final class FocusNotificationSafety {
             return updatable;
         }
 
+        /** Optional sender-provided accent color for a portable timeline. */
+        public String accentColor() {
+            return accentColor;
+        }
+
         public boolean hasProgress() {
             return progress >= 0;
+        }
+
+        /**
+         * Select the delivery renderer by protocol identity, never by sender package.
+         * The business alias is accepted only when scene is absent so another explicit
+         * scene cannot accidentally inherit the food-delivery presentation.
+         */
+        public boolean isFoodDeliveryTimeline() {
+            return FOOD_DELIVERY_SCENE.equals(scene)
+                    || (!hasText(scene) && FOOD_DELIVERY_BUSINESS.equals(business));
+        }
+
+        /** Maps observed delivery progress to one of the three portable stages. */
+        public int stageIndex() {
+            if (!hasProgress() || progress < PORTABLE_MERCHANT_STAGE_PROGRESS) {
+                return -1;
+            }
+            if (progress < PORTABLE_COURIER_STAGE_PROGRESS) {
+                return 0;
+            }
+            if (progress < PORTABLE_DELIVERED_STAGE_PROGRESS) {
+                return 1;
+            }
+            return 2;
+        }
+
+        /** Discrete timeline position used to draw the three-node indicator. */
+        public int timelineProgress() {
+            return Math.max(0, stageIndex()) * 50;
         }
     }
 }

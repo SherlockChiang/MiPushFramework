@@ -78,6 +78,12 @@
     <string name="debug_test_content">这是一个测试内容</string>
     <string name="settings_mock_focus_notification">模拟焦点通知</string>
     <string name="settings_mock_focus_notification_summary">发送携带 MIUI 官方焦点参数的测试通知，用于兼容性检查。</string>
+    <string name="notification_focus_channel_name">焦点通知</string>
+    <string name="notification_focus_channel_description">浮动配送进度更新</string>
+    <string name="notification_focus_stage_merchant">商家接单</string>
+    <string name="notification_focus_stage_courier">骑手配送</string>
+    <string name="notification_focus_stage_delivered">已送达</string>
+    <string name="notification_focus_stage_waiting">等待接单</string>
     <string name="settings_focus_protocol_status">HyperOS 焦点协议</string>
     <string name="settings_focus_protocol_available">SystemUI 已提供焦点协议 v%1$d，将转发焦点参数与图片 Bundle。</string>
     <string name="settings_focus_protocol_unavailable">系统未声明可选的原生协议，仍会转发原始焦点参数，并保留安全的标准通知回退。</string>

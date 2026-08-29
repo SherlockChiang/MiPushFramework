@@ -9,6 +9,7 @@ import android.annotation.TargetApi;
 import android.app.Notification;
 import android.app.PendingIntent;
 import android.content.Context;
+import android.content.res.Configuration;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
@@ -24,6 +25,7 @@ import android.provider.Settings;
 import android.service.notification.StatusBarNotification;
 import android.text.TextUtils;
 import android.util.LruCache;
+import android.widget.RemoteViews;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -131,7 +133,7 @@ public class NotificationController {
         // grouping.  It has no application focus payload of its own; processing
         // the source message again here would duplicate extras and image work.
         notify(context, groupId.hashCode(), packageName, getNotificationTag(packageName),
-                builder, metaInfo, false, false);
+                builder, metaInfo, false, false, null);
     }
 
     @RequiresApi(api = Build.VERSION_CODES.M)
@@ -178,10 +180,21 @@ public class NotificationController {
         notificationBuilder.setPriority(Notification.PRIORITY_HIGH);
 
         boolean attemptFocus = shouldAttachFocusExtras(context, metaInfo);
-        if (!attemptFocus) {
-            applyPortableFocusPresentation(metaInfo, notificationBuilder);
+        FocusNotificationSafety.PortableFocusData portableFocus =
+                getPortableFocusData(metaInfo);
+        boolean usePortableFocus = !attemptFocus
+                && portableFocus.hasProgress()
+                && portableFocus.isFoodDeliveryTimeline();
+        if (usePortableFocus) {
+            // A separate high-importance channel gives portable focus updates a
+            // heads-up/floating presentation without changing ordinary message
+            // channel preferences.
+            applyPortableFocusChannel(context, packageName, notificationBuilder);
         }
-        if (attemptFocus) {
+        if (!attemptFocus) {
+            applyPortableFocusPresentation(portableFocus, notificationBuilder);
+        }
+        if (attemptFocus || usePortableFocus) {
             // The official group supplied by the client always wins. Debug and
             // other direct callers otherwise get a stable focus-only group so a
             // normal notification from the same app cannot fold it away.
@@ -215,11 +228,17 @@ public class NotificationController {
                         }
                         stripFocusNotificationExtras(notificationBuilder);
                         if (focusFailure != null) {
-                            applyPortableFocusPresentation(metaInfo, notificationBuilder);
+                            applyPortableFocusPresentation(portableFocus, notificationBuilder);
+                            if (portableFocus.hasProgress()
+                                    && portableFocus.isFoodDeliveryTimeline()) {
+                                applyPortableFocusChannel(
+                                        context, packageName, notificationBuilder);
+                            }
                         }
                     }
                     return notify(context, deliveryId, deliveryPackage, deliveryTag,
-                            notificationBuilder, metaInfo, true, includeFocusExtras);
+                            notificationBuilder, metaInfo, true, includeFocusExtras,
+                            portableFocus);
                 });
 
         updateSummaryNotification(context, metaInfo, packageName, notification.getGroup());
@@ -233,17 +252,25 @@ public class NotificationController {
      * Android notification.
      */
     private static void applyPortableFocusPresentation(
-            PushMetaInfo metaInfo, NotificationCompat.Builder builder) {
-        if (metaInfo == null || builder == null) {
+            FocusNotificationSafety.PortableFocusData focus,
+            NotificationCompat.Builder builder) {
+        if (focus == null || builder == null) {
             return;
         }
         try {
-            String parameter = XMPushUtils.getConfiguration(metaInfo).focusParam(null);
-            FocusNotificationSafety.PortableFocusData focus =
-                    FocusNotificationSafety.parsePortableFocusData(parameter);
             if (focus.hasProgress()) {
                 builder.setProgress(FocusNotificationSafety.PORTABLE_PROGRESS_MAX,
-                        focus.progress(), false);
+                        focus.isFoodDeliveryTimeline()
+                                ? focus.timelineProgress()
+                                : focus.progress(),
+                        false);
+                if (focus.isFoodDeliveryTimeline()) {
+                    // IMPORTANCE_HIGH on the dedicated channel controls heads-up
+                    // on Android O+; MAX priority preserves the same behavior on
+                    // pre-channel Android and vendor fallbacks.
+                    builder.setPriority(Notification.PRIORITY_MAX);
+                    builder.setCategory(Notification.CATEGORY_PROGRESS);
+                }
             }
             if (focus.updatable()) {
                 builder.setOnlyAlertOnce(true);
@@ -253,6 +280,146 @@ public class NotificationController {
             // authoritative for malformed or unsupported focus payloads.
             logger.w("Unable to apply portable focus presentation", error);
         }
+    }
+
+    private static boolean applyPortableFocusChannel(
+            Context context,
+            String packageName,
+            NotificationCompat.Builder builder) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return true;
+        }
+        if (NotificationChannelManager.ensurePortableFocusChannel(context, packageName)
+                == null) {
+            logger.w("Portable focus channel is unavailable; keeping the original channel");
+            return false;
+        }
+        builder.setChannelId(NotificationChannelManager.getPortableFocusChannelId(packageName));
+        return true;
+    }
+
+    private static FocusNotificationSafety.PortableFocusData getPortableFocusData(
+            @Nullable PushMetaInfo metaInfo) {
+        if (metaInfo == null) {
+            return FocusNotificationSafety.parsePortableFocusData(null);
+        }
+        try {
+            String parameter = XMPushUtils.getConfiguration(metaInfo).focusParam(null);
+            return FocusNotificationSafety.parsePortableFocusData(parameter);
+        } catch (Throwable error) {
+            logger.w("Unable to parse portable focus payload", error);
+            return FocusNotificationSafety.parsePortableFocusData(null);
+        }
+    }
+
+    /**
+     * Draw a compact, public-API notification view for ROMs without Xiaomi's
+     * private focus renderer. The view models the three delivery milestones
+     * observed in sender payloads and never depends on an application package
+     * name or a proprietary SystemUI class.
+     */
+    private static void applyPortableFocusRemoteViews(
+            Context context,
+            NotificationCompat.Builder builder,
+            FocusNotificationSafety.PortableFocusData focus,
+            FocusNotificationSafety.ResolvedContent content) {
+        if (context == null || builder == null || focus == null || content == null
+                || !focus.hasProgress() || !focus.isFoodDeliveryTimeline()) {
+            return;
+        }
+        try {
+            RemoteViews compact = new RemoteViews(
+                    context.getPackageName(), R.layout.notification_focus_portable_compact);
+            RemoteViews expanded = new RemoteViews(
+                    context.getPackageName(), R.layout.notification_focus_portable);
+            compact.setTextViewText(R.id.focus_title, content.title());
+            compact.setTextViewText(R.id.focus_body, content.body());
+            expanded.setTextViewText(R.id.focus_title, content.title());
+            expanded.setTextViewText(R.id.focus_body, content.body());
+
+            int accent = resolvePortableFocusAccent(focus);
+            boolean dark = (context.getResources().getConfiguration().uiMode
+                    & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+            int secondary = dark
+                    ? Color.argb(220, 255, 255, 255)
+                    : Color.argb(190, 0, 0, 0);
+            int primary = dark ? Color.WHITE : Color.BLACK;
+
+            compact.setTextColor(R.id.focus_title, primary);
+            compact.setTextColor(R.id.focus_body, secondary);
+            expanded.setTextColor(R.id.focus_title, primary);
+            expanded.setTextColor(R.id.focus_body, secondary);
+
+            int stage = focus.stageIndex();
+            String stageLabel = stage < 0
+                    ? context.getString(R.string.notification_focus_stage_waiting)
+                    : stage == 0
+                    ? context.getString(R.string.notification_focus_stage_merchant)
+                    : stage == 1
+                    ? context.getString(R.string.notification_focus_stage_courier)
+                    : context.getString(R.string.notification_focus_stage_delivered);
+            compact.setTextViewText(R.id.focus_stage, stageLabel);
+            expanded.setTextViewText(R.id.focus_stage, stageLabel);
+            compact.setTextColor(R.id.focus_stage, stage < 0 ? secondary : accent);
+            expanded.setTextColor(R.id.focus_stage, stage < 0 ? secondary : accent);
+            int[] nodes = {
+                    R.id.focus_dot_merchant,
+                    R.id.focus_dot_courier,
+                    R.id.focus_dot_delivered,
+            };
+            int[] labels = {
+                    R.id.focus_label_merchant,
+                    R.id.focus_label_courier,
+                    R.id.focus_label_delivered,
+            };
+            for (int index = 0; index < nodes.length; index++) {
+                int nodeDrawable = stage == index
+                        ? R.drawable.notification_focus_point_current
+                        : stage > index
+                        ? R.drawable.notification_focus_point_done
+                        : R.drawable.notification_focus_point_inactive;
+                compact.setImageViewResource(nodes[index], nodeDrawable);
+                expanded.setImageViewResource(nodes[index], nodeDrawable);
+                int labelColor = stage == index
+                        ? accent
+                        : stage > index ? primary : secondary;
+                compact.setTextColor(labels[index], labelColor);
+                expanded.setTextColor(labels[index], labelColor);
+            }
+            int timelineProgress = focus.timelineProgress();
+            compact.setProgressBar(R.id.focus_progress_track,
+                    FocusNotificationSafety.PORTABLE_PROGRESS_MAX,
+                    timelineProgress, false);
+            expanded.setProgressBar(R.id.focus_progress_track,
+                    FocusNotificationSafety.PORTABLE_PROGRESS_MAX,
+                    timelineProgress, false);
+
+            builder.setStyle(new NotificationCompat.DecoratedCustomViewStyle());
+            builder.setCustomContentView(compact);
+            builder.setCustomBigContentView(expanded);
+            // Heads-up surfaces are height constrained on Android 12+; the
+            // compact view still contains the three dots and track, while the
+            // full labels remain available after the shade is expanded.
+            builder.setCustomHeadsUpContentView(compact);
+        } catch (Throwable error) {
+            // A custom RemoteViews is an enhancement only. A normal text and
+            // progress notification remains authoritative if a vendor rejects
+            // one of the public RemoteViews operations.
+            logger.w("Unable to apply portable focus RemoteViews", error);
+        }
+    }
+
+    private static int resolvePortableFocusAccent(
+            FocusNotificationSafety.PortableFocusData focus) {
+        String raw = focus.accentColor();
+        if (!TextUtils.isEmpty(raw)) {
+            try {
+                return Color.parseColor(raw);
+            } catch (IllegalArgumentException ignored) {
+                // Fall through to the deterministic project accent.
+            }
+        }
+        return Color.rgb(255, 98, 0);
     }
 
     private static boolean hasNoExplicitChannel(NotificationCompat.Builder builder) {
@@ -302,7 +469,8 @@ public class NotificationController {
             Context context, int notificationId, String packageName,
             String notificationTag, NotificationCompat.Builder notificationBuilder,
             PushMetaInfo metaInfo,
-            boolean includeOfficialMetadata, boolean includeFocusExtras) {
+            boolean includeOfficialMetadata, boolean includeFocusExtras,
+            @Nullable FocusNotificationSafety.PortableFocusData portableFocus) {
         // Make the behavior consistent with official MIUI
         Bundle extras = new Bundle();
         extras.putString("target_package", packageName);
@@ -326,8 +494,14 @@ public class NotificationController {
 
         }
 
-        ensureReadableStandardContent(context, packageName, notificationBuilder,
+        FocusNotificationSafety.ResolvedContent resolvedContent =
+                ensureReadableStandardContent(context, packageName, notificationBuilder,
                 metaInfo, configuration);
+
+        if (!includeFocusExtras) {
+            applyPortableFocusRemoteViews(
+                    context, notificationBuilder, portableFocus, resolvedContent);
+        }
 
         if (includeFocusExtras && configuration != null) {
             addFocusNotificationExtras(context, packageName, notificationBuilder, configuration);
@@ -405,7 +579,7 @@ public class NotificationController {
         }
     }
 
-    private static void ensureReadableStandardContent(
+    private static FocusNotificationSafety.ResolvedContent ensureReadableStandardContent(
             Context context,
             String packageName,
             NotificationCompat.Builder notificationBuilder,
@@ -457,6 +631,7 @@ public class NotificationController {
         if (!hasReadableText(existingBody)) {
             notificationBuilder.setContentText(resolved.body());
         }
+        return resolved;
     }
 
     @Nullable
