@@ -82,6 +82,9 @@ public class NotificationController {
 
     private static final String NOTIFICATION_LARGE_ICON = "mipush_notification";
     private static final String NOTIFICATION_SMALL_ICON = "mipush_small_notification";
+    private static final int NOTIFICATION_LARGE_ICON_DP = 64;
+    private static final int MIN_NOTIFICATION_LARGE_ICON_PX = 64;
+    private static final int MAX_NOTIFICATION_LARGE_ICON_PX = 256;
     private static final String FOCUS_PROTOCOL_SETTING = "notification_focus_protocol";
     private static final String FOCUS_PARAM = "miui.focus.param";
     private static final String FOCUS_PARAM_CUSTOM = "miui.focus.param.custom";
@@ -494,6 +497,12 @@ public class NotificationController {
 
         }
 
+        // QQ QZone and other non-conversation payloads often omit the
+        // sender-icon metadata that the original MIUI client supplies. Keep
+        // the notification identifiable in that case while preserving every
+        // explicit icon selected by the sender or configuration.
+        applyLargeIconFallback(context, packageName, metaInfo, notificationBuilder);
+
         FocusNotificationSafety.ResolvedContent resolvedContent =
                 ensureReadableStandardContent(context, packageName, notificationBuilder,
                 metaInfo, configuration);
@@ -513,6 +522,63 @@ public class NotificationController {
         getNotificationManagerEx().notify(
                 packageName, notificationTag, notificationId, notification);
         return notification;
+    }
+
+    private static void applyLargeIconFallback(
+            Context context,
+            String packageName,
+            @Nullable PushMetaInfo metaInfo,
+            NotificationCompat.Builder builder) {
+        if (context == null || builder == null || TextUtils.isEmpty(packageName)
+                || hasLargeIcon(builder)) {
+            return;
+        }
+
+        try {
+            CustomConfiguration configuration = metaInfo == null
+                    ? null : XMPushUtils.getConfiguration(metaInfo);
+            if (configuration != null) {
+                String[] configuredIcons = {
+                        configuration.notificationLargeIconUri(null),
+                        configuration.conversationSenderIcon(null),
+                        configuration.conversationIcon(null)
+                };
+                for (String iconUri : configuredIcons) {
+                    if (TextUtils.isEmpty(iconUri)) {
+                        continue;
+                    }
+                    Bitmap configuredIcon = getLargeIcon(context, metaInfo, iconUri);
+                    if (configuredIcon != null) {
+                        builder.setLargeIcon(configuredIcon);
+                        return;
+                    }
+                }
+            }
+
+            Bitmap applicationIcon = Global.IconCache().getRawIconBitmap(context, packageName);
+            if (applicationIcon != null && !applicationIcon.isRecycled()) {
+                Bitmap boundedIcon = prepareLargeIconForNotification(
+                        context, metaInfo, applicationIcon);
+                if (boundedIcon != null) {
+                    builder.setLargeIcon(boundedIcon);
+                }
+            }
+        } catch (Throwable error) {
+            // Icon decoration is optional. A missing/broken package icon must
+            // never turn a valid push into a failed notification delivery.
+            logger.w("Unable to resolve notification large-icon fallback", error);
+        }
+    }
+
+    private static boolean hasLargeIcon(NotificationCompat.Builder builder) {
+        try {
+            Notification notification = builder.build();
+            return notification.getLargeIcon() != null;
+        } catch (Throwable error) {
+            // A partially populated builder may not be buildable yet. Let the
+            // caller attempt the fallback; setLargeIcon remains best effort.
+            return false;
+        }
     }
 
     private static boolean shouldAttachFocusExtras(Context context, PushMetaInfo metaInfo) {
@@ -1109,7 +1175,11 @@ public class NotificationController {
             try {
                 Bitmap bitmap = Global.IconCache().getRawIconBitmap(context, packageName);
                 if (bitmap != null && !bitmap.isRecycled()) {
-                    return Icon.createWithBitmap(bitmap);
+                    Bitmap boundedBitmap = prepareLargeIconForNotification(
+                            context, null, bitmap);
+                    if (boundedBitmap != null) {
+                        return Icon.createWithBitmap(boundedBitmap);
+                    }
                 }
             } catch (Throwable error) {
                 logger.w("Unable to resolve target app icon for focus notification", error);
@@ -1124,7 +1194,11 @@ public class NotificationController {
                         .getApplicationIcon(packageName);
                 Bitmap bitmap = ImgUtils.drawableToBitmap(drawable);
                 if (bitmap != null && !bitmap.isRecycled()) {
-                    return Icon.createWithBitmap(bitmap);
+                    Bitmap boundedBitmap = prepareLargeIconForNotification(
+                            context, null, bitmap);
+                    if (boundedBitmap != null) {
+                        return Icon.createWithBitmap(boundedBitmap);
+                    }
                 }
             } catch (Throwable error) {
                 logger.w("Unable to load target app icon from PackageManager", error);
@@ -1241,10 +1315,51 @@ public class NotificationController {
     public static Bitmap getLargeIcon(Context context, PushMetaInfo metaInfo, String iconUri) {
         Bitmap largeIcon = Global.IconCache().getBitmap(context, iconUri,
                 (context1, iconUri1) -> getBitmapFromUri(context1, iconUri1, 200 * KiB));
-        if (largeIcon != null) {
-            largeIcon = roundLargeIconIfConfigured(metaInfo, largeIcon);
+        return prepareLargeIconForNotification(context, metaInfo, largeIcon);
+    }
+
+    /**
+     * Keep notification icons small enough for SystemUI/Binder while preserving
+     * the configured circular treatment. The source bitmap can come from the
+     * shared icon cache, so it is never recycled here.
+     */
+    @Nullable
+    public static Bitmap prepareLargeIconForNotification(
+            Context context, PushMetaInfo metaInfo, Bitmap largeIcon) {
+        if (largeIcon == null || largeIcon.isRecycled()) {
+            return null;
         }
-        return largeIcon;
+        try {
+            int maxDimension = resolveNotificationLargeIconSize(context);
+            int width = largeIcon.getWidth();
+            int height = largeIcon.getHeight();
+            Bitmap boundedIcon = largeIcon;
+            int sourceMax = Math.max(width, height);
+            if (sourceMax > maxDimension) {
+                float scale = (float) maxDimension / sourceMax;
+                int boundedWidth = Math.max(1, Math.round(width * scale));
+                int boundedHeight = Math.max(1, Math.round(height * scale));
+                boundedIcon = Bitmap.createScaledBitmap(
+                        largeIcon, boundedWidth, boundedHeight, true);
+            }
+            return roundLargeIconIfConfigured(metaInfo, boundedIcon);
+        } catch (Throwable error) {
+            // An icon is decoration only. Do not let a malformed/oversized
+            // bitmap prevent the underlying notification from being posted.
+            logger.w("Unable to prepare notification large icon", error);
+            return null;
+        }
+    }
+
+    private static int resolveNotificationLargeIconSize(@Nullable Context context) {
+        float density = 1f;
+        if (context != null && context.getResources() != null
+                && context.getResources().getDisplayMetrics() != null) {
+            density = context.getResources().getDisplayMetrics().density;
+        }
+        int size = Math.round(NOTIFICATION_LARGE_ICON_DP * density);
+        return Math.min(MAX_NOTIFICATION_LARGE_ICON_PX,
+                Math.max(MIN_NOTIFICATION_LARGE_ICON_PX, size));
     }
 
     public static Bitmap roundLargeIconIfConfigured(PushMetaInfo metaInfo, Bitmap largeIcon) {

@@ -8,6 +8,7 @@ import static com.xiaomi.push.service.MyNotificationIconHelper.MiB;
 import static com.xiaomi.xmsf.push.notification.NotificationController.getBitmapFromUri;
 import static com.xiaomi.xmsf.push.notification.NotificationController.getLargeIcon;
 import static com.xiaomi.xmsf.push.notification.NotificationController.getNotificationManagerEx;
+import static com.xiaomi.xmsf.push.notification.NotificationController.prepareLargeIconForNotification;
 import static com.xiaomi.xmsf.push.notification.NotificationController.roundLargeIconIfConfigured;
 
 import android.annotation.TargetApi;
@@ -425,7 +426,8 @@ public class MyMIPushNotificationHelper {
         String packageName = publishPackageName(container);
 
         Context pkgCtx = getPackageContext(context, packageName);
-        NotificationCompat.MessagingStyle.Message message = createMessage(context, container, pkgCtx);
+        NotificationCompat.MessagingStyle.Message message = createMessage(
+                context, container, pkgCtx, packageName);
         CustomConfiguration custom = XMPushUtils.getConfiguration(metaInfo);
         boolean useMessagingStyle = message != null && custom.useMessagingStyle(false);
 
@@ -643,10 +645,14 @@ public class MyMIPushNotificationHelper {
     @NonNull
     private static NotificationCompat.Builder createMessageStyleNotificationBuilder(Context context, XmPushActionContainer container, NotificationCompat.MessagingStyle.Message message, Context pkgCtx, String packageName) {
         PushMetaInfo metaInfo = container.getMetaInfo();
-        Person group = getGroupFor(context, metaInfo).build();
+        Person group = getGroupFor(context, metaInfo, packageName).build();
 
         NotificationCompat.Builder notificationBuilder = new NotificationCompat.Builder(context);
         attachMessagingStyle(message, group, metaInfo, notificationBuilder);
+        // The official large-icon URI is applied later by NotificationController.
+        // When it is absent (for example QQ QZone events), keep the same local
+        // conversation icon visible in the ordinary notification surface.
+        setLargeIconFromPerson(notificationBuilder, group);
         addShortcutToEnableMessagingStyle(context, container, pkgCtx, packageName, group, notificationBuilder);
         return notificationBuilder;
     }
@@ -688,24 +694,28 @@ public class MyMIPushNotificationHelper {
     }
 
     @Nullable
-    private static NotificationCompat.MessagingStyle.Message createMessage(Context context, XmPushActionContainer container, Context pkgCtx) {
+    private static NotificationCompat.MessagingStyle.Message createMessage(
+            Context context, XmPushActionContainer container, Context pkgCtx,
+            String packageName) {
         PushMetaInfo metaInfo = container.metaInfo;
         CustomConfiguration custom = XMPushUtils.getConfiguration(metaInfo);
         String senderMessage = custom.conversationMessage(null);
         if (senderMessage == null) {
             return null;
         }
-        return createMessage(context, pkgCtx, metaInfo, senderMessage);
+        return createMessage(context, pkgCtx, metaInfo, senderMessage, packageName);
     }
 
     @NonNull
-    private static NotificationCompat.MessagingStyle.Message createMessage(Context context, Context pkgCtx, PushMetaInfo metaInfo, String senderMessage) {
+    private static NotificationCompat.MessagingStyle.Message createMessage(
+            Context context, Context pkgCtx, PushMetaInfo metaInfo, String senderMessage,
+            String packageName) {
         boolean atLeastP = pkgCtx != null &&
                 pkgCtx.getApplicationInfo().targetSdkVersion >= Build.VERSION_CODES.P;
 
         Person person = null;
         if (isGroupConversation(metaInfo) || atLeastP) {
-            person = getPerson(context, metaInfo).build();
+            person = getPerson(context, metaInfo, packageName).build();
         }
         return new NotificationCompat.MessagingStyle.Message(
                 senderMessage, metaInfo.getMessageTs(), person);
@@ -717,15 +727,19 @@ public class MyMIPushNotificationHelper {
     }
 
     @NonNull
-    private static Person.Builder getGroupFor(Context context, PushMetaInfo metaInfo) {
+    private static Person.Builder getGroupFor(
+            Context context, PushMetaInfo metaInfo, String packageName) {
         CustomConfiguration custom = XMPushUtils.getConfiguration(metaInfo);
         String conversation = custom.conversationTitle(null);
         String conversationId = custom.conversationId(null);
         String conversationIcon = custom.conversationIcon(null);
+        if (TextUtils.isEmpty(conversationIcon)) {
+            conversationIcon = custom.notificationLargeIconUri(null);
+        }
 
         Person.Builder personBuilder = isGroupConversation(metaInfo) ?
                 new Person.Builder() :
-                getPerson(context, metaInfo);
+                getPerson(context, metaInfo, packageName);
         if (conversation != null) {
             personBuilder.setName(conversation);
         } else if (personBuilder.build().getName() == null) {
@@ -742,11 +756,15 @@ public class MyMIPushNotificationHelper {
     }
 
     @NonNull
-    private static Person.Builder getPerson(Context context, PushMetaInfo metaInfo) {
+    private static Person.Builder getPerson(
+            Context context, PushMetaInfo metaInfo, String packageName) {
         CustomConfiguration custom = XMPushUtils.getConfiguration(metaInfo);
         String sender = custom.conversationSender(null);
         String senderId = custom.conversationSenderId(null);
         String senderIcon = custom.conversationSenderIcon(null);
+        if (TextUtils.isEmpty(senderIcon)) {
+            senderIcon = custom.notificationLargeIconUri(null);
+        }
         String textIcon = custom.textIcon(null);
 
         Person.Builder personBuilder = new Person.Builder().setName(sender);
@@ -762,9 +780,58 @@ public class MyMIPushNotificationHelper {
                     roundLargeIconIfConfigured(metaInfo,
                             ImageUtils.INSTANCE.textToBitmap(textIcon, 72, 0xFF003E6F, Color.WHITE)
                     )));
+        } else if (!isGroupConversation(metaInfo)
+                && shouldUseApplicationIconFallback(senderIcon)) {
+            Bitmap applicationIcon = getApplicationIconForConversation(
+                    context, packageName, metaInfo);
+            if (applicationIcon != null) {
+                personBuilder.setIcon(IconCompat.createWithBitmap(applicationIcon));
+            }
 
         }
         return personBuilder;
+    }
+
+    /**
+     * A sender URI is authoritative.  Only a missing URI may use the local
+     * application icon; an empty URI is treated as missing because config
+     * replacement can intentionally clear an older value.
+     */
+    static boolean shouldUseApplicationIconFallback(@Nullable String senderIcon) {
+        return senderIcon == null || senderIcon.trim().isEmpty();
+    }
+
+    @Nullable
+    private static Bitmap getApplicationIconForConversation(
+            Context context, String packageName, PushMetaInfo metaInfo) {
+        if (context == null || TextUtils.isEmpty(packageName)) {
+            return null;
+        }
+        try {
+            Bitmap icon = Global.IconCache().getRawIconBitmap(context, packageName);
+            if (icon != null && !icon.isRecycled()) {
+                return prepareLargeIconForNotification(context, metaInfo, icon);
+            }
+        } catch (Throwable error) {
+            logger.w("Unable to resolve local conversation application icon", error);
+        }
+        return null;
+    }
+
+    private static void setLargeIconFromPerson(
+            NotificationCompat.Builder notificationBuilder, Person person) {
+        if (notificationBuilder == null || person == null || person.getIcon() == null) {
+            return;
+        }
+        try {
+            Bitmap icon = person.getIcon().getBitmap();
+            if (icon != null && !icon.isRecycled()) {
+                notificationBuilder.setLargeIcon(icon);
+            }
+        } catch (Throwable ignored) {
+            // Resource/URI-backed Person icons are handled by SystemUI. Only
+            // bitmap-backed icons can be copied to Notification.largeIcon.
+        }
     }
 
     private static void carryPendingIntentForTemporarilyWhitelisted(Context xmPushService, XmPushActionContainer buildContainer, NotificationCompat.Builder localBuilder) {
