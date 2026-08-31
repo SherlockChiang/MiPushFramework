@@ -83,6 +83,16 @@ public class MiPushFrameworkApp extends Application {
     @Override
     public void onTrimMemory(int level) {
         super.onTrimMemory(level);
+        trimCaches(level);
+    }
+
+    @Override
+    public void onLowMemory() {
+        super.onLowMemory();
+        trimCaches(android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL);
+    }
+
+    private void trimCaches(int level) {
         // All caches are accelerators. Apply the same pressure signal to the
         // notification and settings layers without cancelling active delivery.
         try {
@@ -104,20 +114,6 @@ public class MiPushFrameworkApp extends Application {
             AppIconKt.trimIconCache(level);
         } catch (Throwable error) {
             logCacheFailure("Unable to trim settings UI icon cache", error);
-        }
-    }
-
-    @Override
-    public void onLowMemory() {
-        super.onLowMemory();
-        try {
-            Global.IconCache().clearMemory();
-            Global.ApplicationNameCache().clearMemory();
-            NotificationController.trimMemory(
-                    android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL);
-            AppIconKt.clearIconCache();
-        } catch (Throwable error) {
-            logCacheFailure("Unable to clear process caches", error);
         }
     }
 
