@@ -17,9 +17,13 @@ public class NetworkStatusReceiver extends BroadcastReceiver {
     private static final String ACTION_NETWORK_STATUS_CHANGED =
             "com.xiaomi.push.network_status_changed";
     static final long MIN_RECOVERY_INTERVAL_MS = 60_000L;
+    /** Registration refresh is useful after reconnect, but connectivity broadcasts can burst. */
+    static final long MIN_REGISTRATION_PROCESS_INTERVAL_MS = 5 * 60 * 1000L;
     static final long NO_RECOVERY_ATTEMPT = Long.MIN_VALUE;
 
     private static final AtomicLong LAST_RECOVERY_ELAPSED_REALTIME =
+            new AtomicLong(NO_RECOVERY_ATTEMPT);
+    private static final AtomicLong LAST_REGISTRATION_PROCESS_ELAPSED_REALTIME =
             new AtomicLong(NO_RECOVERY_ATTEMPT);
 
     public void onReceive(Context context, Intent intent) {
@@ -49,12 +53,38 @@ public class NetworkStatusReceiver extends BroadcastReceiver {
         try {
             if (hasNetwork) {
                 PushServiceClient client = PushServiceClient.getInstance(context);
-                if (client.isProvisioned()) {
+                if (client.isProvisioned()
+                        && claimRegistrationProcessing(SystemClock.elapsedRealtime())) {
                     client.processRegisterTask();
                 }
             }
         } catch (Throwable ignored) {
         }
+    }
+
+    private static boolean claimRegistrationProcessing(long nowElapsedRealtime) {
+        while (true) {
+            long previous = LAST_REGISTRATION_PROCESS_ELAPSED_REALTIME.get();
+            if (!shouldProcessRegistration(true, previous, nowElapsedRealtime)) {
+                return false;
+            }
+            if (LAST_REGISTRATION_PROCESS_ELAPSED_REALTIME.compareAndSet(previous,
+                    nowElapsedRealtime)) {
+                return true;
+            }
+        }
+    }
+
+    static boolean shouldProcessRegistration(
+            boolean hasNetwork, long previousElapsedRealtime, long nowElapsedRealtime) {
+        if (!hasNetwork) {
+            return false;
+        }
+        if (previousElapsedRealtime == NO_RECOVERY_ATTEMPT) {
+            return true;
+        }
+        long elapsed = nowElapsedRealtime - previousElapsedRealtime;
+        return elapsed < 0L || elapsed >= MIN_REGISTRATION_PROCESS_INTERVAL_MS;
     }
 
     private static boolean claimRecovery(long nowElapsedRealtime) {

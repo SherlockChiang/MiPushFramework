@@ -28,6 +28,18 @@ public class AlarmSchedulePolicyTest {
     }
 
     @Test
+    public void powerSaveModeUsesInexactAlarmEvenWhenExactIsAllowed() {
+        AlarmScheduleType type = AlarmSchedulePolicy.determineScheduleType(34, true, true);
+        assertEquals(AlarmScheduleType.INEXACT_ALLOW_WHILE_IDLE, type);
+    }
+
+    @Test
+    public void legacyPowerSaveModeUsesIdleAwareInexactAlarm() {
+        AlarmScheduleType type = AlarmSchedulePolicy.determineScheduleType(30, true, true);
+        assertEquals(AlarmScheduleType.INEXACT_ALLOW_WHILE_IDLE, type);
+    }
+
+    @Test
     public void api31ExactAlarmNotAllowedReturnsInexactAllowWhileIdle() {
         AlarmScheduleType type = AlarmSchedulePolicy.determineScheduleType(31, false);
         assertEquals(AlarmScheduleType.INEXACT_ALLOW_WHILE_IDLE, type);

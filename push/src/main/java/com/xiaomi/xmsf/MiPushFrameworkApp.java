@@ -21,6 +21,7 @@ import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 
 import com.elvishew.xlog.XLog;
+import com.nihility.Global;
 import com.nihility.notification.NotificationManagerEx;
 import com.nihility.utils.Hooker;
 import com.nihility.utils.PrivilegeElevator;
@@ -29,6 +30,7 @@ import com.oasisfeng.condom.CondomProcess;
 import com.xiaomi.xmsf.push.control.PushControllerUtils;
 import com.xiaomi.xmsf.push.control.StartupWorkPolicy;
 import com.xiaomi.xmsf.push.control.XMOutbound;
+import com.xiaomi.xmsf.push.notification.NotificationController;
 import com.xiaomi.xmsf.push.service.MiuiPushActivateService;
 import com.xiaomi.xmsf.utils.LogUtils;
 
@@ -36,6 +38,7 @@ import top.trumeet.common.Constants;
 import top.trumeet.common.push.PushServiceAccessibility;
 import top.trumeet.common.utils.Utils;
 import top.trumeet.mipush.provider.DatabaseUtils;
+import top.trumeet.mipushframework.component.AppIconKt;
 
 
 public class MiPushFrameworkApp extends Application {
@@ -74,6 +77,53 @@ public class MiPushFrameworkApp extends Application {
                 PushControllerUtils.isPrefsEnable(this))) {
             awakePushActivateService(PushControllerUtils.wrapContext(this));
             requestDozeWhiteList();
+        }
+    }
+
+    @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        // All caches are accelerators. Apply the same pressure signal to the
+        // notification and settings layers without cancelling active delivery.
+        try {
+            Global.IconCache().trimMemory(level);
+        } catch (Throwable error) {
+            logCacheFailure("Unable to trim shared icon cache", error);
+        }
+        try {
+            Global.ApplicationNameCache().trimMemory(level);
+        } catch (Throwable error) {
+            logCacheFailure("Unable to trim application-name cache", error);
+        }
+        try {
+            NotificationController.trimMemory(level);
+        } catch (Throwable error) {
+            logCacheFailure("Unable to trim focus-notification image cache", error);
+        }
+        try {
+            AppIconKt.trimIconCache(level);
+        } catch (Throwable error) {
+            logCacheFailure("Unable to trim settings UI icon cache", error);
+        }
+    }
+
+    @Override
+    public void onLowMemory() {
+        super.onLowMemory();
+        try {
+            Global.IconCache().clearMemory();
+            Global.ApplicationNameCache().clearMemory();
+            NotificationController.trimMemory(
+                    android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL);
+            AppIconKt.clearIconCache();
+        } catch (Throwable error) {
+            logCacheFailure("Unable to clear process caches", error);
+        }
+    }
+
+    private void logCacheFailure(String message, Throwable error) {
+        if (logger != null) {
+            logger.w(message, error);
         }
     }
 

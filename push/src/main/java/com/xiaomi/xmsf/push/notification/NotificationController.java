@@ -114,6 +114,17 @@ public class NotificationController {
         }
     }
 
+    /**
+     * Release process-local notification artwork when Android reports memory
+     * pressure. In-flight downloads are intentionally left alone: cancelling
+     * them could turn a valid focus notification into a missing notification.
+     */
+    public static void trimMemory(int level) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            FocusIconApi23.trimMemory(level);
+        }
+    }
+
 
     @TargetApi(Build.VERSION_CODES.N)
     private static void updateSummaryNotification(Context context, PushMetaInfo metaInfo, String packageName, String groupId) {
@@ -1138,6 +1149,16 @@ public class NotificationController {
                 };
 
         private FocusIconApi23() {
+        }
+
+        static void trimMemory(int level) {
+            if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
+                IMAGE_CACHE.evictAll();
+            } else if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+                IMAGE_CACHE.trimToSize(IMAGE_CACHE_MAX_BYTES / 2);
+            } else if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_MODERATE) {
+                IMAGE_CACHE.trimToSize(IMAGE_CACHE_MAX_BYTES / 4);
+            }
         }
 
         private static ExecutorService createImageExecutor() {

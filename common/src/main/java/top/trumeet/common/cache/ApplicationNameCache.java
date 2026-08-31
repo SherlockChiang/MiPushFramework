@@ -44,5 +44,16 @@ public class ApplicationNameCache {
         cacheInstance.evictAll();
     }
 
+    /**
+     * Apply the process memory-pressure policy to this small, UI-oriented cache.
+     * Names are inexpensive to resolve, so dropping them is preferable to keeping
+     * stale objects alive while the process is backgrounded.
+     */
+    public void trimMemory(int level) {
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            clearMemory();
+        }
+    }
+
 
 }

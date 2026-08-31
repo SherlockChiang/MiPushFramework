@@ -25,6 +25,19 @@ fun initIconCache(context: Context) {
     }
 }
 
+/** Called by the process lifecycle to release UI-only decoded artwork. */
+fun trimIconCache(level: Int) {
+    if (::iconCache.isInitialized) {
+        iconCache.trimMemory(level)
+    }
+}
+
+fun clearIconCache() {
+    if (::iconCache.isInitialized) {
+        iconCache.clearMemory()
+    }
+}
+
 @Composable
 fun AppIcon(packageName: String, appName: String?, modifier: Modifier = Modifier) {
     val isPreview = LocalInspectionMode.current

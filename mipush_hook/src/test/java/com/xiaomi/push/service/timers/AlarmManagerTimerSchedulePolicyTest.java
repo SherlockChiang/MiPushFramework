@@ -39,6 +39,26 @@ public class AlarmManagerTimerSchedulePolicyTest {
     }
 
     @Test
+    public void powerSaveModeUsesInexactScheduleAndPreservesDeadline() {
+        AlarmManagerTimerSchedulePolicy.Schedule schedule =
+                AlarmManagerTimerSchedulePolicy.forWallClockDeadline(
+                        34, true, true, WALL_CLOCK_DEADLINE_MS);
+
+        assertEquals(AlarmScheduleType.INEXACT_ALLOW_WHILE_IDLE, schedule.getScheduleType());
+        assertEquals(WALL_CLOCK_DEADLINE_MS, schedule.getTriggerAtMillis());
+        assertEquals(WALL_CLOCK_DEADLINE_MS, schedule.getNextPingTimestampMillis());
+    }
+
+    @Test
+    public void legacyPowerSaveModeUsesInexactSchedule() {
+        AlarmManagerTimerSchedulePolicy.Schedule schedule =
+                AlarmManagerTimerSchedulePolicy.forWallClockDeadline(
+                        30, true, true, WALL_CLOCK_DEADLINE_MS);
+
+        assertEquals(AlarmScheduleType.INEXACT_ALLOW_WHILE_IDLE, schedule.getScheduleType());
+    }
+
+    @Test
     public void expiredOrZeroDeadlineIsPassedThroughWithoutDelayConversionOrClamping() {
         AlarmManagerTimerSchedulePolicy.Schedule expired =
                 AlarmManagerTimerSchedulePolicy.forWallClockDeadline(30, false, 0L);

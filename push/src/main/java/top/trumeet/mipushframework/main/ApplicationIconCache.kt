@@ -8,7 +8,7 @@ import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.res.imageResource
 import androidx.core.graphics.drawable.toBitmap
-import java.util.concurrent.ConcurrentHashMap
+import androidx.collection.LruCache
 
 class ApplicationIconCache(context: Context) {
     val context: Context = context.applicationContext
@@ -20,16 +20,33 @@ class ApplicationIconCache(context: Context) {
             )
         )
     }
-    private val iconCache = ConcurrentHashMap<String, Painter>()
+    // The settings UI can enumerate hundreds of packages. Keep only a bounded
+    // working set so visiting the app list cannot retain every decoded icon.
+    private val iconCache = LruCache<String, Painter>(48)
 
     fun get(packageName: String): Painter? {
-        return iconCache[packageName]
+        return iconCache.get(packageName)
     }
 
     fun cache(packageName: String): Painter {
         val icon = getAppIcon(packageName)
-        iconCache[packageName] = icon
+        iconCache.put(packageName, icon)
         return icon
+    }
+
+    fun trimMemory(level: Int) {
+        when {
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ->
+                iconCache.evictAll()
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ->
+                iconCache.trimToSize(24)
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_MODERATE ->
+                iconCache.trimToSize(12)
+        }
+    }
+
+    fun clearMemory() {
+        iconCache.evictAll()
     }
 
     private fun getAppIcon(packageName: String): BitmapPainter {

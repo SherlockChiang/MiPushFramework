@@ -91,13 +91,22 @@ public class IconCache {
      * the package icon on demand.
      */
     public void trimMemory(int level) {
-        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
+        // Once the UI is hidden, these decoded bitmaps no longer provide user
+        // value. Evict them completely so a background push process can remain
+        // small on memory-constrained/vendor devices.
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN
+                || level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
             clearMemory();
         } else if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
             trimToSize(bitmapLruCache.maxSize() / 2,
                     mIconMemoryCaches.maxSize() / 2,
                     appColorCache.maxSize() / 2,
                     bitmapCache.maxSize() / 2);
+        } else if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_MODERATE) {
+            trimToSize(Math.max(1, bitmapLruCache.maxSize() / 4),
+                    Math.max(1, mIconMemoryCaches.maxSize() / 4),
+                    Math.max(1, appColorCache.maxSize() / 4),
+                    Math.max(1, bitmapCache.maxSize() / 4));
         }
     }
 

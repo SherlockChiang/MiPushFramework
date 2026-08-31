@@ -55,8 +55,16 @@ final class AlarmManagerTimerSchedulePolicy {
 
     static Schedule forWallClockDeadline(
             int sdkInt, boolean canScheduleExactAlarms, long wallClockDeadlineMs) {
+        return forWallClockDeadline(
+                sdkInt, canScheduleExactAlarms, false, wallClockDeadlineMs);
+    }
+
+    static Schedule forWallClockDeadline(
+            int sdkInt, boolean canScheduleExactAlarms, boolean powerSaveMode,
+            long wallClockDeadlineMs) {
         AlarmScheduleType scheduleType =
-                AlarmSchedulePolicy.determineScheduleType(sdkInt, canScheduleExactAlarms);
+                AlarmSchedulePolicy.determineScheduleType(
+                        sdkInt, canScheduleExactAlarms, powerSaveMode);
         return new Schedule(
                 scheduleType,
                 ClockType.RTC_WAKEUP,

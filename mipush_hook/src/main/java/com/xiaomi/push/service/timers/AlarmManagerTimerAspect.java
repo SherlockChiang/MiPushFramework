@@ -5,6 +5,7 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
+import android.os.PowerManager;
 
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
@@ -36,10 +37,20 @@ public class AlarmManagerTimerAspect {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 canScheduleExact = alarmManager.canScheduleExactAlarms();
             }
+            boolean powerSaveMode = false;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                try {
+                    PowerManager powerManager =
+                            (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+                    powerSaveMode = powerManager != null && powerManager.isPowerSaveMode();
+                } catch (Throwable ignored) {
+                    // A missing/denied power-state probe must not block scheduling.
+                }
+            }
 
             AlarmManagerTimerSchedulePolicy.Schedule schedule =
                     AlarmManagerTimerSchedulePolicy.forWallClockDeadline(
-                            Build.VERSION.SDK_INT, canScheduleExact, deadlineMs);
+                            Build.VERSION.SDK_INT, canScheduleExact, powerSaveMode, deadlineMs);
 
             int flags = PendingIntent.FLAG_UPDATE_CURRENT;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {

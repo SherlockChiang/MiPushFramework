@@ -59,4 +59,27 @@ public class NetworkStatusReceiverTest {
                 90_000L,
                 100L));
     }
+
+    @Test
+    public void registrationRefreshIsSuppressedDuringConnectivityBurst() {
+        assertFalse(NetworkStatusReceiver.shouldProcessRegistration(
+                true,
+                1_000L,
+                1_000L + NetworkStatusReceiver.MIN_REGISTRATION_PROCESS_INTERVAL_MS - 1L));
+    }
+
+    @Test
+    public void registrationRefreshRunsAtIntervalBoundary() {
+        assertTrue(NetworkStatusReceiver.shouldProcessRegistration(
+                true,
+                1_000L,
+                1_000L + NetworkStatusReceiver.MIN_REGISTRATION_PROCESS_INTERVAL_MS));
+    }
+
+    @Test
+    public void registrationRefreshRequiresNetwork() {
+        assertFalse(NetworkStatusReceiver.shouldProcessRegistration(false,
+                NetworkStatusReceiver.NO_RECOVERY_ATTEMPT,
+                1L));
+    }
 }
