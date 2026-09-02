@@ -70,9 +70,10 @@
 
         <!--
             Notification clicks enter this transparent, internal hand-off first.
-            Private SDK routes first establish a visible target task and then
-            forward the full MiPush payload, preserving vendor bridge callbacks
-            on Android 16/HyperOS without per-application adapters.
+            Private SDK routes first forward the full MiPush payload from the
+            user click, then use a visible target fallback only if the SDK does
+            not navigate. This preserves vendor bridge callbacks without
+            per-application adapters or launcher-to-deep-link task gaps.
         -->
         <activity
                 android:name=".NotificationClickActivity"

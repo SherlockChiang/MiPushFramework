@@ -1012,10 +1012,10 @@ public class MyMIPushNotificationHelper {
         // MiPush bridge implementations). XMSF cannot start a non-exported
         // Activity because Android enforces the target UID at PendingIntent
         // send time. Route those clicks through an isolated user-click hand-off;
-        // it brings the target task forward before delivering the payload to
-        // the target SDK. Exported routes continue to use the direct Activity
-        // PendingIntent so HyperOS can provide its normal conversation and
-        // floating-window affordances.
+        // it delivers the payload to the target SDK first and opens the target
+        // launcher only as a bounded fallback. Exported routes use the direct
+        // Activity PendingIntent so HyperOS can provide its normal conversation
+        // and floating-window affordances.
         boolean targetActivityExported = isActivityExported(context, activityIntent);
         if (shouldUseClickTrampoline(replaySenderRoute, targetActivityExported)) {
             Intent clickTrampoline = new Intent(context,

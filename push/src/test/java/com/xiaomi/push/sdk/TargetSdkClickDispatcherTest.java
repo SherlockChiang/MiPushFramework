@@ -80,11 +80,45 @@ public class TargetSdkClickDispatcherTest {
     }
 
     @Test
-    public void privateAndReplayRoutesPrimeTargetTask() {
-        assertTrue(TargetSdkClickDispatcher.shouldPrimeTargetTask(false, true));
-        assertTrue(TargetSdkClickDispatcher.shouldPrimeTargetTask(true, false));
-        assertTrue(TargetSdkClickDispatcher.shouldPrimeTargetTask(true, true));
-        assertFalse(TargetSdkClickDispatcher.shouldPrimeTargetTask(false, false));
+    public void privateAndReplayRoutesDispatchSdkBeforeOpeningLauncher() {
+        assertEquals(NotificationClickHandoffPolicy.Action.DISPATCH_SDK_FIRST,
+                NotificationClickHandoffPolicy.initialAction(false, true));
+        assertEquals(NotificationClickHandoffPolicy.Action.DISPATCH_SDK_FIRST,
+                NotificationClickHandoffPolicy.initialAction(true, false));
+        assertEquals(NotificationClickHandoffPolicy.Action.DISPATCH_SDK_FIRST,
+                NotificationClickHandoffPolicy.initialAction(true, true));
+        assertEquals(NotificationClickHandoffPolicy.Action.START_DIRECT_TARGET,
+                NotificationClickHandoffPolicy.initialAction(false, false));
+    }
+
+    @Test
+    public void acceptedSdkDeliveryWaitsForNavigationWithoutStartingLauncher() {
+        assertEquals(NotificationClickHandoffPolicy.Action.WAIT_FOR_TARGET,
+                NotificationClickHandoffPolicy.afterSdkDispatch(true, false));
+        assertEquals(NotificationClickHandoffPolicy.Action.FINISH,
+                NotificationClickHandoffPolicy.afterSdkDispatch(true, true));
+    }
+
+    @Test
+    public void rejectedSdkDeliveryFallsBackImmediately() {
+        assertEquals(NotificationClickHandoffPolicy.Action.START_FALLBACK,
+                NotificationClickHandoffPolicy.afterSdkDispatch(false, false));
+    }
+
+    @Test
+    public void navigationProbeUsesLauncherOnlyAfterBoundedTimeout() {
+        assertEquals(NotificationClickHandoffPolicy.Action.WAIT_FOR_TARGET,
+                NotificationClickHandoffPolicy.afterNavigationProbe(false, false, true));
+        assertEquals(NotificationClickHandoffPolicy.Action.FINISH,
+                NotificationClickHandoffPolicy.afterNavigationProbe(true, false, true));
+        assertEquals(NotificationClickHandoffPolicy.Action.START_FALLBACK,
+                NotificationClickHandoffPolicy.afterNavigationProbe(false, true, true));
+    }
+
+    @Test
+    public void navigationProbeDoesNotLaunchBehindKeyguard() {
+        assertEquals(NotificationClickHandoffPolicy.Action.FINISH,
+                NotificationClickHandoffPolicy.afterNavigationProbe(false, true, false));
     }
 
     @Test

@@ -33,11 +33,12 @@ import java.util.List;
  *
  * <p>A notification click may enter XMSF first when the sender-declared Activity
  * is private. Starting the target service directly while the target UID is
- * still backgrounded is rejected by modern Android. The trampoline first
- * establishes a visible target task; this dispatcher then uses an immutable,
- * one-shot PendingIntent so supported platform/OEM implementations can also
- * retain the user-initiated hand-off metadata. Neither mechanism requires
- * package-specific routing.</p>
+ * still backgrounded is rejected by modern Android. This dispatcher uses an
+ * immutable, one-shot PendingIntent directly from the user-click trampoline,
+ * allowing supported platform/OEM implementations to retain the
+ * user-initiated hand-off metadata. The target launcher is only a bounded
+ * fallback when SDK delivery produces no visible UI. Neither mechanism
+ * requires package-specific routing.</p>
  */
 public final class TargetSdkClickDispatcher {
     private static final String SDK_SERVICE_CLASS =
@@ -94,12 +95,6 @@ public final class TargetSdkClickDispatcher {
     }
 
     private TargetSdkClickDispatcher() {
-    }
-
-    /** Private and replay routes need a visible target task behind the SDK hand-off. */
-    public static boolean shouldPrimeTargetTask(
-            boolean manualReplay, boolean targetActivityPrivate) {
-        return manualReplay || targetActivityPrivate;
     }
 
     static String receiverPermission(String targetPackage) {
