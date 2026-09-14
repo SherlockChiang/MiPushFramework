@@ -1408,6 +1408,22 @@ public class NotificationController {
         return bitmap;
     }
 
+
+    /** Remove all notifications attributed to a package after its uninstall. */
+    public static void cancelPackageNotifications(Context context, String packageName) {
+        if (context == null || packageName == null || packageName.isEmpty()) return;
+        try {
+            StatusBarNotification[] active = getNotificationManagerEx().getActiveNotifications(packageName);
+            if (active == null) return;
+            for (StatusBarNotification sbn : active) {
+                if (sbn != null) {
+                    getNotificationManagerEx().cancel(packageName, sbn.getTag(), sbn.getId());
+                }
+            }
+        } catch (Throwable error) {
+            logger.w("Unable to clear notifications for removed package " + packageName, error);
+        }
+    }
     public static void cancel(Context context, XmPushActionContainer container,
                               int notificationId, String notificationGroup, boolean clearGroup) {
         String packageName = MyMIPushNotificationHelper.getNotificationTargetPackage(container);

@@ -228,6 +228,10 @@ public class MyMIPushNotificationHelper {
     public static void notifyPushMessage(Context context, byte[] decryptedContent) {
         XmPushActionContainer container = XMPushUtils.packToContainer(decryptedContent);
         String targetPackage = publishPackageName(container);
+        if (!isTargetPackageAvailable(context, targetPackage)) {
+            logger.i("Skip notification for unavailable target package " + targetPackage);
+            return;
+        }
         AppInfoUtils.AppNotificationOp notificationOp =
                 AppInfoUtils.getAppNotificationOp(context, targetPackage, true);
         if (notificationOp == AppInfoUtils.AppNotificationOp.NOT_ALLOWED) {
@@ -240,6 +244,20 @@ public class MyMIPushNotificationHelper {
             // will later own the published notification.
             handleNotificationByConfigurations(
                     context, decryptedContent, publishPackageName(container), container);
+        }
+    }
+
+    /** A stale MiPush registration must not resurrect notifications for a removed or disabled app. */
+    static boolean isTargetPackageAvailable(Context context, String packageName) {
+        if (context == null || TextUtils.isEmpty(packageName)) return false;
+        try {
+            android.content.pm.ApplicationInfo info = context.getPackageManager().getApplicationInfo(packageName, 0);
+            return info != null && info.enabled;
+        } catch (PackageManager.NameNotFoundException ignored) {
+            return false;
+        } catch (Throwable error) {
+            logger.w("Unable to verify target package " + packageName, error);
+            return false;
         }
     }
 
@@ -981,7 +999,8 @@ public class MyMIPushNotificationHelper {
         // startActivity(), which Android 16/HyperOS may reject even though the
         // notification click itself is user initiated. A package launcher is a
         // safe fallback when the sender did not provide notify_effect metadata.
-        ClickRouteResolution clickRoute = restoredSenderRoute != null
+        boolean hasFocusRoute = getFocusRouteIntent(context, container) != null;
+        ClickRouteResolution clickRoute = restoredSenderRoute != null && !hasFocusRoute
                 ? restoredSenderRoute : resolveSdkClickRoute(context, container);
         Intent activityIntent = clickRoute == null ? null : clickRoute.intent;
         if (activityIntent == null) {
