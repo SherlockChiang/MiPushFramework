@@ -91,6 +91,7 @@ class MainPage : ComponentActivity() {
                 var floatingBottomNav by rememberSaveable {
                     mutableStateOf(Global.ConfigCenter().isFloatingBottomNavigation(applicationContext))
                 }
+                var navigationEpoch by rememberSaveable { mutableStateOf(0) }
                 val navigationBarColor = if (floatingBottomNav) {
                     Color.Transparent
                 } else {
@@ -113,12 +114,13 @@ class MainPage : ComponentActivity() {
                 Main(
                     startDestination = Screen.Apps.route.toString(),
                     floatingBottomNav = floatingBottomNav,
+                    onNavigate = { navigationEpoch++ },
                 ) {
                     composable(Screen.Events.route.toString()) {
                         Column {
                             var query by rememberSaveable { mutableStateOf("") }
                             SearchBar(placeholder) { query = it }
-                            EventList(query)
+                            EventList(query, dismissSignal = navigationEpoch)
                         }
                     }
                     composable(Screen.Apps.route.toString()) {
@@ -246,6 +248,7 @@ fun BottomNavigationBar(
     modifier: Modifier = Modifier,
     floating: Boolean = true,
     initialRoute: String? = null,
+    onNavigate: () -> Unit = {},
 ) {
     val items = listOf(
         Screen.Events, Screen.Apps, Screen.Settings
@@ -272,6 +275,7 @@ fun BottomNavigationBar(
             selected = selected,
             onClick = { index ->
                 val screen = items[index]
+                onNavigate()
                 navController.navigate(screen.route.toString()) {
                     popUpTo(navController.graph.startDestinationId) { saveState = true }
                     launchSingleTop = true
@@ -287,6 +291,7 @@ fun BottomNavigationBar(
 private fun Main(
     startDestination: String,
     floatingBottomNav: Boolean = true,
+    onNavigate: () -> Unit = {},
     navContent: NavGraphBuilder.() -> Unit
 ) {
     val navController = rememberNavController()
@@ -318,6 +323,7 @@ private fun Main(
                         modifier = Modifier.fillMaxWidth(),
                         floating = false,
                         initialRoute = startDestination,
+                        onNavigate = onNavigate,
                     )
                 }
             },
@@ -345,6 +351,7 @@ private fun Main(
                                     routes = swipeRoutes,
                                 )
                                 if (targetRoute != null) {
+                                    onNavigate()
                                     navController.navigate(targetRoute) {
                                         popUpTo(navController.graph.startDestinationId) {
                                             saveState = true
@@ -379,6 +386,7 @@ private fun Main(
                     navController = navController,
                     floating = true,
                     initialRoute = startDestination,
+                    onNavigate = onNavigate,
                 )
             }
         }

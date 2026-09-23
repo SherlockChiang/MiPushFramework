@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -57,13 +58,21 @@ import java.util.Date
 private val receiveDateFormat: SimpleDateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
 
 @Composable
-fun EventList(query: String = "", packageName: String = "") {
+fun EventList(
+    query: String = "",
+    packageName: String = "",
+    dismissSignal: Int = 0,
+) {
     Page {
         val context = LocalContext.current
         var clickedEvent by remember { mutableStateOf<EventInfoForDisplay?>(null) }
 
         clickedEvent?.let {
-            EventDetailsDialog(clickedEvent!!) { clickedEvent = null }
+            EventDetailsDialog(
+                clickedEvent = it,
+                dismissSignal = dismissSignal,
+                onDismiss = { clickedEvent = null },
+            )
         }
 
         var lastId by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -117,6 +126,7 @@ fun toEventInfoForDisplay(
 private fun EventDetailsDialog(
     clickedEvent: EventInfoForDisplay,
     content: String? = null,
+    dismissSignal: Int = 0,
     onDismiss: () -> Unit
 ) {
     var json by remember {
@@ -132,6 +142,13 @@ private fun EventDetailsDialog(
     val targetHeight = screenHeight * 0.9f
 
     val show = remember(clickedEvent.id) { mutableStateOf(true) }
+    val openedAtNavigationEpoch = remember(clickedEvent.id) { dismissSignal }
+    LaunchedEffect(dismissSignal) {
+        if (dismissSignal != openedAtNavigationEpoch) {
+            show.value = false
+            onDismiss()
+        }
+    }
     var replayStatus by remember(clickedEvent.id) {
         mutableStateOf<EventListPageUtils.ReplayStatus?>(null)
     }
