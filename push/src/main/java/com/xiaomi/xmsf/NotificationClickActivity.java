@@ -28,7 +28,6 @@ import com.nihility.XMPushUtils;
 
 import java.util.List;
 
-import top.trumeet.common.override.ActivityManagerOverride;
 
 /**
  * User-initiated notification click hand-off.
@@ -221,17 +220,23 @@ public final class NotificationClickActivity extends Activity {
         if (clickFinished) {
             return;
         }
+        boolean started = false;
         try {
             if (pendingClickIntent != null) {
-                startTargetActivity(
+                started = startTargetActivity(
                         pendingTargetIntent, pendingClickIntent, pendingContainer,
                         pendingTargetActivityPrivate);
             }
         } catch (Throwable error) {
             Log.w(TAG, "direct notification click route failed", error);
-        } finally {
-            finishAfterClick("DIRECT_TARGET");
         }
+        if (!started) {
+            // A malformed or stale sender route must not make the transparent
+            // hand-off finish onto the launcher. Keep the user in the target
+            // application whenever its exported entry point is available.
+            started = startTargetLauncher(pendingTargetPackage);
+        }
+        finishAfterClick(started ? "DIRECT_TARGET" : "DIRECT_TARGET_UNAVAILABLE");
     }
 
     private void startFallbackAndFinish(String reason) {
@@ -345,12 +350,13 @@ public final class NotificationClickActivity extends Activity {
                     return true;
                 }
             }
-            int importance = ActivityManagerOverride.getPackageImportance(
-                    pendingTargetPackage, activityManager);
-            // VISIBLE is useful for translucent target Activities. Do not use
-            // FOREGROUND here: that may only be the SDK receiver processing the
-            // payload and would suppress the bounded launcher fallback.
-            return importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE;
+            // Process importance is not a UI signal: a push receiver or a
+            // foreground service can make the target process visible while the
+            // user is still looking at the notification shade. Finishing the
+            // trampoline in that state exposes the launcher. The onStop signal
+            // above covers opaque target Activities; otherwise require an
+            // actual target Activity at the top of a task.
+            return false;
         } catch (Throwable unavailable) {
             // Usage access and hidden-API availability differ across third-party
             // ROMs. onStop remains the portable opaque-Activity readiness signal.

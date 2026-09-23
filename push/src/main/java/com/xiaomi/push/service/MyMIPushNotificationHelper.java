@@ -999,8 +999,12 @@ public class MyMIPushNotificationHelper {
         // startActivity(), which Android 16/HyperOS may reject even though the
         // notification click itself is user initiated. A package launcher is a
         // safe fallback when the sender did not provide notify_effect metadata.
-        boolean hasFocusRoute = getFocusRouteIntent(context, container) != null;
-        ClickRouteResolution clickRoute = restoredSenderRoute != null && !hasFocusRoute
+        // The sender's original click contract remains authoritative. Focus
+        // metadata describes presentation and may carry a detail URL, but it
+        // must not replace a sender route that was already validated from the
+        // original payload. This is especially important for ordinary
+        // notifications that happen to carry optional focus metadata.
+        ClickRouteResolution clickRoute = restoredSenderRoute != null
                 ? restoredSenderRoute : resolveSdkClickRoute(context, container);
         Intent activityIntent = clickRoute == null ? null : clickRoute.intent;
         if (activityIntent == null) {
@@ -1156,9 +1160,7 @@ public class MyMIPushNotificationHelper {
                 senderContainer.getMetaInfo(), configuredContainer.getMetaInfo())) {
             ClickRouteResolution senderRoute =
                     resolveSdkClickRoute(context, senderContainer);
-            if (senderRoute != null
-                    && !senderRoute.discoveredRoute
-                    && isActivityExported(context, senderRoute.intent)) {
+            if (senderRoute != null && !senderRoute.discoveredRoute) {
                 logger.d("Restoring sender-declared notification click route for "
                         + publishPackageName(configuredContainer));
                 return senderRoute;
@@ -1504,7 +1506,7 @@ public class MyMIPushNotificationHelper {
                     configuration.focusParamCustom(null)
             };
             for (String parameter : parameters) {
-                if (!FocusNotificationSafety.isWellFormedParameter(parameter)) {
+                if (!FocusNotificationSafety.isClickRoutePayload(parameter)) {
                     continue;
                 }
                 Intent route = findPayloadRoute(

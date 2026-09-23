@@ -223,6 +223,56 @@ public final class FocusNotificationSafety {
         }
     }
 
+    /**
+     * Returns whether a focus payload carries the identity fields required for
+     * a user-click deep link. A readable focus object may contain a URL for
+     * display purposes without being an instruction to replace the sender's
+     * ordinary notification route.
+     */
+    public static boolean isClickRoutePayload(String parameter) {
+        if (!isWellFormedParameter(parameter)) {
+            return false;
+        }
+        try {
+            JsonElement parsed = JsonParser.parseString(parameter);
+            if (!parsed.isJsonObject()) {
+                return false;
+            }
+            JsonObject root = parsed.getAsJsonObject();
+            JsonObject paramV2 = object(root, "param_v2");
+            return hasPositiveProtocol(root) || hasPositiveProtocol(paramV2)
+                    ? hasSequence(root) || hasSequence(paramV2)
+                    : false;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static boolean hasPositiveProtocol(JsonObject object) {
+        if (object == null) {
+            return false;
+        }
+        JsonElement protocol = object.get("protocol");
+        if (protocol == null || !protocol.isJsonPrimitive()) {
+            return false;
+        }
+        try {
+            return protocol.getAsInt() > 0;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static boolean hasSequence(JsonObject object) {
+        if (object == null) {
+            return false;
+        }
+        JsonElement sequence = object.get("sequence");
+        return sequence != null && sequence.isJsonPrimitive()
+                && sequence.getAsString() != null
+                && !sequence.getAsString().trim().isEmpty();
+    }
+
     private static boolean referencesPictureAlias(
             JsonElement element, String alias, int depth) {
         // A focus parameter is capped at 3 KiB, but a malicious sender can

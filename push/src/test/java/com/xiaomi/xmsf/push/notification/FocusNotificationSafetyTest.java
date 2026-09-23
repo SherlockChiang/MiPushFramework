@@ -86,6 +86,20 @@ public class FocusNotificationSafetyTest {
     }
 
     @Test
+    public void clickRouteRequiresFocusProtocolIdentity() {
+        assertTrue(FocusNotificationSafety.isClickRoutePayload(
+                "{\"protocol\":1,\"sequence\":123,"
+                        + "\"url\":\"https://example.test/detail\"}"));
+        assertTrue(FocusNotificationSafety.isClickRoutePayload(
+                "{\"param_v2\":{\"protocol\":1,\"sequence\":123},"
+                        + "\"url\":\"https://example.test/detail\"}"));
+        assertFalse(FocusNotificationSafety.isClickRoutePayload(
+                "{\"url\":\"https://example.test/marketing\"}"));
+        assertFalse(FocusNotificationSafety.isClickRoutePayload(
+                "{\"protocol\":1,\"url\":\"https://example.test/detail\"}"));
+    }
+
+    @Test
     public void customFocusParameterUsesTheSameBoundedJsonObjectContract() {
         assertTrue(FocusNotificationSafety.isWellFormedParameter(
                 "{\"business\":\"tsmclient\",\"param_island\":{}}"));
