@@ -49,6 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.NavigationBar
@@ -64,6 +65,9 @@ import top.yukonga.miuix.kmp.utils.SmoothRoundedCornerShape
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sign
+
+/** Layer reserved for Miuix secondary windows above the persistent bottom navigation. */
+const val SECONDARY_WINDOW_Z_INDEX = 100f
 
 /**
  * Small page-level adapters for the Miuix API.
@@ -138,7 +142,7 @@ fun MiuixDialog(
     content: @Composable () -> Unit,
 ) {
     SuperDialog(
-        modifier = modifier,
+        modifier = modifier.zIndex(SECONDARY_WINDOW_Z_INDEX),
         title = title,
         show = show,
         onDismissRequest = {
@@ -255,6 +259,7 @@ fun MiuixBottomNavigation(
         val panelWidth = tabWidth * items.size + 8.dp
         Surface(
             modifier = modifier
+                .zIndex(1f)
                 // A floating panel must own its intrinsic width.  `wrapContentWidth()` preserves
                 // a full-width parent constraint, which makes the Surface paint an opaque strip
                 // across the whole bottom row when this component is placed in an overlay.
@@ -382,7 +387,7 @@ fun MiuixBottomNavigation(
         }
     } else {
         NavigationBar(
-            modifier = modifier,
+            modifier = modifier.zIndex(1f),
             items = items,
             selected = selected,
             onClick = onClick,
