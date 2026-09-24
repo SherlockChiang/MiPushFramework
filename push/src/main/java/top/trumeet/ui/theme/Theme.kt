@@ -2,6 +2,8 @@ package top.trumeet.ui.theme
 
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme as materialDarkColorScheme
@@ -16,6 +18,7 @@ import top.yukonga.miuix.kmp.theme.Colors
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
+import top.yukonga.miuix.kmp.utils.MiuixPopupUtil.Companion.MiuixPopupHost
 
 private val DarkColorScheme: Colors = darkColorScheme(
     primary = MiuixBlueDark,
@@ -90,7 +93,15 @@ fun Theme(
         MiuixTheme(
             colors = colors,
             textStyles = AppTextStyles,
-            content = content,
+            content = {
+                // Keep the shared Miuix popup host after the app content. The main page places
+                // its floating navigation outside the page scaffold, so a page-local host would
+                // render dialogs below that navigation layer.
+                Box(modifier = androidx.compose.ui.Modifier.fillMaxSize()) {
+                    content()
+                    MiuixPopupHost()
+                }
+            },
         )
     }
 }
