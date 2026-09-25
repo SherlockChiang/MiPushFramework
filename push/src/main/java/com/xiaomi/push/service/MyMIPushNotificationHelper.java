@@ -869,6 +869,33 @@ public class MyMIPushNotificationHelper {
         return idWithPackage.hashCode();
     }
 
+    /**
+     * PendingIntent identity must be narrower than the Android notification id.
+     * Several senders, including Taobao, deliberately reuse one notifyId while
+     * publishing different messages and deep links. Reusing that id as the
+     * request code lets FLAG_UPDATE_CURRENT replace an older card's click
+     * payload with the newest one.
+     */
+    static int getClickRequestCode(
+            XmPushActionContainer container,
+            int notificationId,
+            @Nullable Intent routeIntent) {
+        PushMetaInfo metaInfo = container == null ? null : container.getMetaInfo();
+        StringBuilder identity = new StringBuilder()
+                .append(publishPackageName(container)).append('|')
+                .append(notificationId).append('|')
+                .append(metaInfo == null ? "" : metaInfo.getId()).append('|')
+                .append(metaInfo == null ? 0L : metaInfo.getMessageTs());
+        if (routeIntent != null) {
+            identity.append('|').append(routeIntent.getAction())
+                    .append('|').append(routeIntent.getDataString())
+                    .append('|').append(routeIntent.getComponent())
+                    .append('|').append(routeIntent.getFlags())
+                    .append('|').append(routeIntent.getCategories());
+        }
+        return identity.toString().hashCode();
+    }
+
     public static String getNotificationTag(String packageName) {
         return "mipush_" + packageName;
     }
@@ -979,7 +1006,7 @@ public class MyMIPushNotificationHelper {
             intent.setData(Uri.parse(urlJump));
             intent.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
             return ClickPendingIntent.activity(PendingIntent.getActivity(
-                    context, notificationId, intent,
+                    context, getClickRequestCode(container, notificationId, intent), intent,
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
         }
 
@@ -1027,7 +1054,7 @@ public class MyMIPushNotificationHelper {
                 explicitSetting, messagingStyle, activityIntent, replaySenderRoute);
         if (!useActivity) {
             return ClickPendingIntent.service(PendingIntent.getService(
-                    context, notificationId, intent,
+                    context, getClickRequestCode(container, notificationId, null), intent,
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
         }
 
@@ -1068,7 +1095,8 @@ public class MyMIPushNotificationHelper {
             clickTrampoline.addFlags(
                     Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
             return ClickPendingIntent.activity(PendingIntent.getActivity(
-                    context, notificationId, clickTrampoline,
+                    context, getClickRequestCode(container, notificationId, activityIntent),
+                    clickTrampoline,
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
         }
 
@@ -1083,7 +1111,8 @@ public class MyMIPushNotificationHelper {
             activityIntent.putExtras(intent);
         }
         return ClickPendingIntent.activity(PendingIntent.getActivity(
-                context, notificationId, activityIntent,
+                context, getClickRequestCode(container, notificationId, activityIntent),
+                activityIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE));
     }
 
