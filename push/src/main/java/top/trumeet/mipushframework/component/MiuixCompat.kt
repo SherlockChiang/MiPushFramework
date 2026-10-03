@@ -141,15 +141,27 @@ fun MiuixDialog(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
+    // SuperDialog moves its content into the shared popup host. Capture the
+    // caller's theme so the surface and its controls cannot resolve different
+    // light/dark defaults in that separate composition.
+    val colors = MiuixTheme.colorScheme
+    val textStyles = MiuixTheme.textStyles
     SuperDialog(
         modifier = modifier.zIndex(SECONDARY_WINDOW_Z_INDEX),
         title = title,
+        titleColor = colors.onSurface,
+        summaryColor = colors.onSurfaceVariantSummary,
+        backgroundColor = colors.surface,
         show = show,
         onDismissRequest = {
             dismissDialog(show)
             onDismiss()
         },
-        content = content,
+        content = {
+            MiuixTheme(colors = colors, textStyles = textStyles) {
+                content()
+            }
+        },
     )
 }
 
