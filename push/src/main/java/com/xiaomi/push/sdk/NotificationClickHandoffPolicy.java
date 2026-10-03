@@ -22,8 +22,8 @@ public final class NotificationClickHandoffPolicy {
     }
 
     public static Action initialAction(
-            boolean manualReplay, boolean targetActivityPrivate) {
-        return manualReplay || targetActivityPrivate
+            boolean sdkFirst, boolean targetActivityPrivate) {
+        return sdkFirst || targetActivityPrivate
                 ? Action.DISPATCH_SDK_FIRST
                 : Action.START_DIRECT_TARGET;
     }

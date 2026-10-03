@@ -9,7 +9,6 @@ import android.annotation.TargetApi;
 import android.app.Notification;
 import android.app.PendingIntent;
 import android.content.Context;
-import android.content.res.Configuration;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
@@ -352,17 +351,6 @@ public class NotificationController {
             expanded.setTextViewText(R.id.focus_body, content.body());
 
             int accent = resolvePortableFocusAccent(focus);
-            boolean dark = (context.getResources().getConfiguration().uiMode
-                    & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
-            int secondary = dark
-                    ? Color.argb(220, 255, 255, 255)
-                    : Color.argb(190, 0, 0, 0);
-            int primary = dark ? Color.WHITE : Color.BLACK;
-
-            compact.setTextColor(R.id.focus_title, primary);
-            compact.setTextColor(R.id.focus_body, secondary);
-            expanded.setTextColor(R.id.focus_title, primary);
-            expanded.setTextColor(R.id.focus_body, secondary);
 
             int stage = focus.stageIndex();
             String stageLabel = stage < 0
@@ -374,8 +362,13 @@ public class NotificationController {
                     : context.getString(R.string.notification_focus_stage_delivered);
             compact.setTextViewText(R.id.focus_stage, stageLabel);
             expanded.setTextViewText(R.id.focus_stage, stageLabel);
-            compact.setTextColor(R.id.focus_stage, stage < 0 ? secondary : accent);
-            expanded.setTextColor(R.id.focus_stage, stage < 0 ? secondary : accent);
+            // Leave the waiting label on the XML theme color.  RemoteViews are
+            // inflated by SystemUI, whose night-mode configuration can differ
+            // from XMSF's process configuration.
+            if (stage >= 0) {
+                compact.setTextColor(R.id.focus_stage, accent);
+                expanded.setTextColor(R.id.focus_stage, accent);
+            }
             int[] nodes = {
                     R.id.focus_dot_merchant,
                     R.id.focus_dot_courier,
@@ -394,11 +387,12 @@ public class NotificationController {
                         : R.drawable.notification_focus_point_inactive;
                 compact.setImageViewResource(nodes[index], nodeDrawable);
                 expanded.setImageViewResource(nodes[index], nodeDrawable);
-                int labelColor = stage == index
-                        ? accent
-                        : stage > index ? primary : secondary;
-                compact.setTextColor(labels[index], labelColor);
-                expanded.setTextColor(labels[index], labelColor);
+                // Inactive/completed labels retain the XML theme color.  Only
+                // the active milestone needs a runtime accent override.
+                if (stage == index) {
+                    compact.setTextColor(labels[index], accent);
+                    expanded.setTextColor(labels[index], accent);
+                }
             }
             int timelineProgress = focus.timelineProgress();
             compact.setProgressBar(R.id.focus_progress_track,
@@ -1493,14 +1487,14 @@ public class NotificationController {
             notificationBuilder.setLargeIcon(BitmapFactory.decodeResource(pkgContext.getResources(), largeIconId));
         }
 
-        notificationBuilder.setColor(getIconColor(context, packageName));
+        applyIconAccent(notificationBuilder, getIconColor(context, packageName));
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             IconConfigurations.IconConfig iconConfig = Global.IconConfigurations().get(packageName);
             if (iconConfig != null && iconConfig.isEnabled && iconConfig.isEnabledAll) {
                 Bitmap iconBitmap = iconConfig.bitmap();
                 if (iconBitmap != null) {
                     notificationBuilder.setSmallIcon(IconCompat.createWithBitmap(iconBitmap));
-                    notificationBuilder.setColor(iconConfig.color());
+                    applyIconAccent(notificationBuilder, iconConfig.color());
                     return;
                 }
             }
@@ -1517,7 +1511,7 @@ public class NotificationController {
             Bitmap iconBitmap = iconConfig == null ? null : iconConfig.bitmap();
             if (iconBitmap != null && iconConfig.isEnabled) {
                 notificationBuilder.setSmallIcon(IconCompat.createWithBitmap(iconBitmap));
-                notificationBuilder.setColor(iconConfig.color());
+                applyIconAccent(notificationBuilder, iconConfig.color());
                 return;
             }
 
@@ -1526,6 +1520,22 @@ public class NotificationController {
                 notificationBuilder.setSmallIcon(iconCache);
                 return;
             }
+        }
+    }
+
+    static void applyIconAccent(NotificationCompat.Builder builder, int color) {
+        // MessagingStyle also uses Notification.color for sender text in
+        // heads-up views. An icon pack's accent is not a text theme. Preserve
+        // the builder color so SystemUI can choose readable conversation text;
+        // explicit sender colors are still applied later by official metadata.
+        try {
+            if (NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(
+                    builder.build()) == null) {
+                builder.setColor(color);
+            }
+        } catch (RuntimeException ignored) {
+            // A partially populated builder can reject an early build. Icon
+            // tint is optional; preserve its existing color in that case.
         }
     }
 

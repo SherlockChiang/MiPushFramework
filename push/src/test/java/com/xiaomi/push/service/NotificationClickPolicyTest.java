@@ -33,4 +33,41 @@ public class NotificationClickPolicyTest {
         assertFalse(MyMIPushNotificationHelper.shouldUseClickTrampoline(false, true));
         assertFalse(MyMIPushNotificationHelper.shouldAttachMiPushBridgeExtras(true));
     }
+
+    @Test
+    public void liveEmptyQueryBridgeUsesTheReplayHandoff() {
+        boolean liveSdkFirst = MyMIPushNotificationHelper.shouldDispatchSenderBridgeThroughSdk(
+                false, "android.intent.action.VIEW", "agoo://example.test/thirdpush?");
+        boolean replaySdkFirst = MyMIPushNotificationHelper.shouldUseReplayClickTrampoline(
+                true, true, false);
+        assertTrue(MyMIPushNotificationHelper.shouldUseClickTrampoline(liveSdkFirst, true));
+        assertTrue(MyMIPushNotificationHelper.shouldUseClickTrampoline(replaySdkFirst, true));
+        assertTrue(MyMIPushNotificationHelper.shouldDispatchSenderBridgeThroughSdk(
+                false, "android.intent.action.VIEW", "agoo://example.test/thirdpush?&#fragment"));
+    }
+
+    @Test
+    public void completeAndDiscoveredRoutesDoNotBecomeSdkBridges() {
+        for (String uri : new String[] { null, "app://host/detail", "app://host/detail?id=42&",
+                "app://host/detail#fragment?", "app://host/detail?q=%3F" }) {
+            assertFalse(MyMIPushNotificationHelper.shouldDispatchSenderBridgeThroughSdk(
+                    false, "android.intent.action.VIEW", uri));
+        }
+        assertFalse(MyMIPushNotificationHelper.shouldDispatchSenderBridgeThroughSdk(
+                true, "android.intent.action.VIEW", "app://host/detail?"));
+        assertFalse(MyMIPushNotificationHelper.shouldDispatchSenderBridgeThroughSdk(
+                false, "example.third.push", "app://host/detail?"));
+    }
+
+    @Test
+    public void incompletePayloadUriIsRejectedWithoutChangingExplicitRoutes() {
+        assertFalse(MyMIPushNotificationHelper.hasUsablePayloadRouteSyntax(
+                "agoo://example.test/detail?"));
+        assertFalse(MyMIPushNotificationHelper.hasUsablePayloadRouteSyntax(
+                "agoo://example.test/detail?&"));
+        assertTrue(MyMIPushNotificationHelper.hasUsablePayloadRouteSyntax(
+                "agoo://example.test/detail?orderId=42"));
+        assertTrue(MyMIPushNotificationHelper.hasUsablePayloadRouteSyntax(
+                "agoo://example.test/thirdpush"));
+    }
 }

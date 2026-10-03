@@ -1041,6 +1041,10 @@ public class MyMIPushNotificationHelper {
                 NotificationReplayMarker.isMarked(container),
                 clickRoute != null,
                 clickRoute != null && clickRoute.discoveredRoute);
+        boolean sdkFirstSenderRoute = replaySenderRoute || (clickRoute != null
+                && shouldDispatchSenderBridgeThroughSdk(
+                        clickRoute.discoveredRoute, activityIntent.getAction(),
+                        activityIntent.getDataString()));
         // Keep the setting tri-state: an absent key selects the direct Activity
         // path, while an explicitly supplied false can still request the
         // historical service PendingIntent for live-notification compatibility.
@@ -1051,7 +1055,7 @@ public class MyMIPushNotificationHelper {
                 ? configuration.useClickedActivity(false)
                 : null;
         boolean useActivity = shouldUseActivityClick(
-                explicitSetting, messagingStyle, activityIntent, replaySenderRoute);
+                explicitSetting, messagingStyle, activityIntent, sdkFirstSenderRoute);
         if (!useActivity) {
             return ClickPendingIntent.service(PendingIntent.getService(
                     context, getClickRequestCode(container, notificationId, null), intent,
@@ -1067,7 +1071,7 @@ public class MyMIPushNotificationHelper {
         // Activity PendingIntent so HyperOS can provide its normal conversation
         // and floating-window affordances.
         boolean targetActivityExported = isActivityExported(context, activityIntent);
-        if (shouldUseClickTrampoline(replaySenderRoute, targetActivityExported)) {
+        if (shouldUseClickTrampoline(sdkFirstSenderRoute, targetActivityExported)) {
             Intent clickTrampoline = new Intent(context,
                     com.xiaomi.xmsf.NotificationClickActivity.class);
             clickTrampoline.putExtras(extra);
@@ -1083,6 +1087,9 @@ public class MyMIPushNotificationHelper {
             clickTrampoline.putExtra(
                     com.xiaomi.xmsf.NotificationClickActivity.EXTRA_MANUAL_REPLAY,
                     replaySenderRoute);
+            clickTrampoline.putExtra(
+                    com.xiaomi.xmsf.NotificationClickActivity.EXTRA_SDK_FIRST,
+                    sdkFirstSenderRoute);
             clickTrampoline.putExtra(
                     com.xiaomi.xmsf.NotificationClickActivity.EXTRA_TARGET_PACKAGE,
                     targetPackage);
@@ -1140,10 +1147,28 @@ public class MyMIPushNotificationHelper {
         return !activityPendingIntent;
     }
 
-    /** SDK-owned/private routes use the isolated hand-off; exported live routes stay direct. */
+    /** SDK-owned/private routes use the isolated hand-off; complete routes stay direct. */
     static boolean shouldUseClickTrampoline(
-            boolean replaySenderRoute, boolean targetActivityExported) {
-        return replaySenderRoute || !targetActivityExported;
+            boolean sdkFirstSenderRoute, boolean targetActivityExported) {
+        return sdkFirstSenderRoute || !targetActivityExported;
+    }
+
+    /**
+     * An exported VIEW bridge with an empty query is not a complete deep link.
+     * Its SDK must decode the original payload before navigating, just as for
+     * a manual replay. Do not guess a business URL or clear sender extras.
+     * Fully specified routes (including messaging mini-window routes) remain
+     * direct Activity PendingIntents.
+     */
+    static boolean shouldDispatchSenderBridgeThroughSdk(
+            boolean discoveredRoute, String action, String data) {
+        if (discoveredRoute || !Intent.ACTION_VIEW.equals(action) || data == null) {
+            return false;
+        }
+        int fragment = data.indexOf('#');
+        String route = fragment < 0 ? data : data.substring(0, fragment);
+        int query = route.indexOf('?');
+        return query >= 0 && route.substring(query + 1).replace("&", "").isEmpty();
     }
 
     /**
@@ -1255,17 +1280,16 @@ public class MyMIPushNotificationHelper {
      */
     static boolean shouldUseActivityClick(
             @Nullable Boolean explicitSetting, boolean messagingStyle,
-            @Nullable Intent activityIntent, boolean replaySenderRoute) {
+            @Nullable Intent activityIntent, boolean sdkFirstSenderRoute) {
         // A missing/invalid target can never be upgraded to an Activity
         // PendingIntent. The caller supplies only intents validated against the
         // target package, while this guard keeps the fallback safe for all paths.
         if (activityIntent == null) {
             return false;
         }
-        // A manual replay has no valid live vendor-click token to fall back to.
-        // Keep it in the user-initiated SDK hand-off even when an old per-app
-        // compatibility setting requested the legacy Service PendingIntent.
-        if (replaySenderRoute) {
+        // SDK-owned bridges require the user-initiated Activity hand-off even
+        // when an old setting requested a background Service PendingIntent.
+        if (sdkFirstSenderRoute) {
             return true;
         }
         // Explicit configuration always wins over the MessagingStyle default,
@@ -1666,7 +1690,8 @@ public class MyMIPushNotificationHelper {
         }
         String route = value.trim();
         if (route.length() == 0 || route.length() > PAYLOAD_ROUTE_MAX_LENGTH
-                || route.indexOf('\n') >= 0 || route.indexOf('\r') >= 0) {
+                || route.indexOf('\n') >= 0 || route.indexOf('\r') >= 0
+                || !hasUsablePayloadRouteSyntax(route)) {
             return null;
         }
         try {
@@ -1690,6 +1715,21 @@ public class MyMIPushNotificationHelper {
         } catch (Throwable ignored) {
             return null;
         }
+    }
+
+    /**
+     * Payloads occasionally contain a template URI with an empty query marker
+     * (for example {@code scheme://host/path?}) instead of the actual
+     * message-specific parameters. Resolving that placeholder can open a
+     * blank intermediate page and let the target app redirect to its launcher.
+     * Explicit sender routes are validated separately and are not affected.
+     */
+    static boolean hasUsablePayloadRouteSyntax(String route) {
+        if (route == null) {
+            return false;
+        }
+        String value = route.trim();
+        return !value.endsWith("?") && !value.endsWith("&");
     }
 
     /**

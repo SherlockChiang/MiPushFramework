@@ -49,6 +49,8 @@ public final class NotificationClickActivity extends Activity {
             "com.xiaomi.xmsf.extra.NOTIFICATION_TARGET_ACTIVITY_PRIVATE";
     public static final String EXTRA_MANUAL_REPLAY =
             "com.xiaomi.xmsf.extra.NOTIFICATION_MANUAL_REPLAY";
+    public static final String EXTRA_SDK_FIRST =
+            "com.xiaomi.xmsf.extra.NOTIFICATION_SDK_FIRST";
     public static final String EXTRA_TARGET_PACKAGE =
             "com.xiaomi.xmsf.extra.NOTIFICATION_TARGET_PACKAGE";
 
@@ -66,6 +68,7 @@ public final class NotificationClickActivity extends Activity {
     @Nullable private String pendingTargetPackage;
     private boolean pendingTargetActivityPrivate;
     private boolean pendingManualReplay;
+    private boolean pendingSdkFirst;
     private boolean waitingForTargetNavigation;
     private boolean sdkDispatchAttempted;
     private boolean clickFinished;
@@ -167,11 +170,14 @@ public final class NotificationClickActivity extends Activity {
         pendingContainer = container;
         pendingTargetActivityPrivate = targetActivityPrivate;
         pendingManualReplay = manualReplay;
+        // Old replay PendingIntents have no SDK_FIRST extra. Preserve their
+        // behavior while allowing live SDK bridges to use the same hand-off.
+        pendingSdkFirst = manualReplay || clickIntent.getBooleanExtra(EXTRA_SDK_FIRST, false);
         pendingTargetPackage = resolveTargetPackage(clickIntent, container, targetIntent);
 
         NotificationClickHandoffPolicy.Action initialAction =
                 NotificationClickHandoffPolicy.initialAction(
-                        manualReplay, targetActivityPrivate);
+                        pendingSdkFirst, targetActivityPrivate);
         if (initialAction == NotificationClickHandoffPolicy.Action.DISPATCH_SDK_FIRST) {
             dispatchSdkFirst();
         } else {
@@ -247,7 +253,7 @@ public final class NotificationClickActivity extends Activity {
         mainHandler.removeCallbacks(targetVisibilityProbe);
         boolean started = false;
         try {
-            if (pendingManualReplay) {
+            if (pendingSdkFirst) {
                 started = startTargetLauncher(pendingTargetPackage);
             } else if (pendingClickIntent != null) {
                 started = startTargetActivity(
@@ -296,7 +302,7 @@ public final class NotificationClickActivity extends Activity {
         }
     }
 
-    /** Replay payloads may contain stale vendor bridge tokens; failure opens only the app root. */
+    /** Failed SDK bridges may contain missing/stale tokens; open only the app root. */
     private boolean startTargetLauncher(@Nullable String targetPackage) {
         if (targetPackage == null || targetPackage.equals(getPackageName())) {
             return false;
